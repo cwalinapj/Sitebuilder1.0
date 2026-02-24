@@ -1,0 +1,44 @@
+[
+  {
+    "id": "modern-minimal-a",
+    "template": "landing",
+    "variant": "a",
+    "name": "Modern Minimal",
+    "tags": ["modern", "minimal", "clean", "professional"]
+  },
+  {
+    "id": "warm-artisan-a",
+    "template": "portfolio",
+    "variant": "a",
+    "name": "Warm Artisan",
+    "tags": ["warm", "handcrafted", "earthy", "storytelling"]
+  },
+  {
+    "id": "bold-startup-a",
+    "template": "landing",
+    "variant": "a",
+    "name": "Bold Startup",
+    "tags": ["bold", "vibrant", "tech", "conversion"]
+  },
+  {
+    "id": "classic-corporate-a",
+    "template": "business",
+    "variant": "a",
+    "name": "Classic Corporate",
+    "tags": ["corporate", "trust", "professional", "structured"]
+  },
+  {
+    "id": "playful-creative-a",
+    "template": "portfolio",
+    "variant": "a",
+    "name": "Playful Creative",
+    "tags": ["playful", "creative", "colorful", "dynamic"]
+  },
+  {
+    "id": "luxury-elegant-a",
+    "template": "business",
+    "variant": "a",
+    "name": "Luxury Elegant",
+    "tags": ["luxury", "elegant", "premium", "minimal"]
+  }
+]

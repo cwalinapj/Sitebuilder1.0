@@ -1,0 +1,27 @@
+{
+  "business_profile": {
+    "name": "Acme Studio",
+    "industry": "creative services",
+    "goals": [
+      "book consultations",
+      "show portfolio"
+    ]
+  },
+  "taste_profile": {
+    "modern": 0.9,
+    "minimal": 0.8,
+    "professional": 0.7,
+    "creative": 0.4,
+    "warm": 0.2
+  },
+  "history": {
+    "shown_demos": [],
+    "likes": [],
+    "dislikes": []
+  },
+  "current_candidates": [
+    "modern-minimal-a",
+    "luxury-elegant-a",
+    "classic-corporate-a"
+  ]
+}

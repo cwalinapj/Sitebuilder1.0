@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "note": "Tag-based placeholder. Embeddings can be added later.",
+  "items": [
+    {"design_id": "modern-minimal-a", "tags": ["modern", "minimal", "clean", "professional"]},
+    {"design_id": "warm-artisan-a", "tags": ["warm", "handcrafted", "earthy", "storytelling"]},
+    {"design_id": "bold-startup-a", "tags": ["bold", "vibrant", "tech", "conversion"]},
+    {"design_id": "classic-corporate-a", "tags": ["corporate", "trust", "professional", "structured"]},
+    {"design_id": "playful-creative-a", "tags": ["playful", "creative", "colorful", "dynamic"]},
+    {"design_id": "luxury-elegant-a", "tags": ["luxury", "elegant", "premium", "minimal"]}
+  ]
+}
