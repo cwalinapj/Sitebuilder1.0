@@ -1,0 +1,31 @@
+{
+  "business_name": "Neighborhood Home Services",
+  "phone": "+1-555-0100",
+  "location_type": "service_area",
+  "address": null,
+  "service_area": {
+    "city": "Springfield",
+    "state": "IL"
+  },
+  "hours": {
+    "mon_fri": "08:00-18:00",
+    "sat": "09:00-14:00",
+    "sun": "Closed"
+  },
+  "services": [
+    "Drain cleaning",
+    "Leak repair",
+    "Water heater installation"
+  ],
+  "short_description": "Fast local plumbing and repair support.",
+  "long_description": "Neighborhood Home Services provides reliable residential plumbing maintenance, repairs, and emergency support for homeowners.",
+  "socials": {
+    "website": "https://example.com",
+    "facebook": "https://facebook.com/example"
+  },
+  "images": [
+    "assets/hero.jpg"
+  ],
+  "free_form": "Licensed plumbers for drain cleaning, pipe leak repairs, and water heater installs.",
+  "detected_category": "plumber"
+}

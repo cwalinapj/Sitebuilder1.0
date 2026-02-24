@@ -1,0 +1,12 @@
+{
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "name": "Neighborhood Home Services",
+  "telephone": "+1-555-0100",
+  "description": "Fast local plumbing and repair support.",
+  "areaServed": {
+    "city": "Springfield",
+    "state": "IL"
+  },
+  "address": null
+}
