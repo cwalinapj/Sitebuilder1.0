@@ -44,3 +44,22 @@ test('worker stores semantic memory and updates taste profile for tracked events
   assert.match(db.statements[1].sql, /INSERT INTO taste_profile/);
   assert.deepEqual(Object.keys(EVENT_COUNTER_COLUMNS).length, 8);
 });
+
+test('worker rejects unsupported event types', async () => {
+  const db = createMockDb();
+  const req = new Request('https://worker.example/events', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'u55',
+      type: 'unknown.event'
+    })
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error, 'Invalid event type');
+  assert.equal(db.statements.length, 0);
+});

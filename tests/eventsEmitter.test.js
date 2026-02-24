@@ -36,4 +36,5 @@ test('events emitter posts like/dislike, builder, template, publish, and portfol
       EVENT_TYPES.PORTFOLIO_FILTERABLE_VIEW
     ]
   );
+  assert.equal(parsed[7].payload.section, 'portfolio');
 });

@@ -74,8 +74,25 @@ export default {
       timestamp: body.timestamp || new Date().toISOString()
     };
 
-    await storeSemanticMemory(env.DB, event);
-    await updateTasteProfile(env.DB, event);
+    if (!EVENT_COUNTER_COLUMNS[event.type]) {
+      return new Response(JSON.stringify({ ok: false, error: 'Invalid event type' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+
+    try {
+      await storeSemanticMemory(env.DB, event);
+      await updateTasteProfile(env.DB, event);
+    } catch (error) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'Failed to persist event', detail: error.message }),
+        {
+          status: 500,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    }
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,

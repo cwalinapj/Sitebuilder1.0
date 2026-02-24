@@ -24,6 +24,12 @@ export class EventsEmitter {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(event)
+    }).then((response) => {
+      if (!response?.ok) {
+        throw new Error('Failed to emit event');
+      }
+
+      return response;
     });
   }
 
