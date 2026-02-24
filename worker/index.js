@@ -10,6 +10,7 @@ const EVENT_COUNTER_COLUMNS = {
   [EVENT_TYPES.BUILD_PUBLISH]: 'builds_published',
   [EVENT_TYPES.PORTFOLIO_FILTERABLE_VIEW]: 'portfolio_views'
 };
+const UNKNOWN_PREMIUM_SKU_ERROR = 'Unknown premium sku';
 
 async function storeSemanticMemory(db, { userId, type, payload, timestamp }) {
   await db
@@ -75,13 +76,13 @@ async function getPatronRewardTotal(db, { patronUserId, sku }) {
     )
     .bind(patronUserId, sku)
     .first();
-  return Number(row?.total_rewarded || 0);
+  return Number(row?.total_rewarded ?? 0);
 }
 
 async function createPremiumPurchase(db, { userId, sku, patronUserId, createdAt }) {
   const premiumSku = await getPremiumSku(db, sku);
   if (!premiumSku) {
-    throw new Error('Unknown premium sku');
+    throw new Error(UNKNOWN_PREMIUM_SKU_ERROR);
   }
 
   const purchaseId = crypto.randomUUID();
@@ -131,10 +132,26 @@ export default {
 
     if (url.pathname === '/purchase') {
       const body = await request.json();
-      const userId = body.userId || 'anonymous';
-      const sku = body.sku || 'premium_isotope';
+      const userId = body.userId;
+      const sku = body.sku;
       const patronUserId = body.patronUserId || null;
-      const createdAt = Number(body.createdAt) || Date.now();
+      const createdAt = body.createdAt == null ? Date.now() : Number(body.createdAt);
+
+      if (!userId || !sku) {
+        return new Response(
+          JSON.stringify({ ok: false, error: 'Missing required fields: userId and sku' }),
+          {
+            status: 400,
+            headers: { 'content-type': 'application/json' }
+          }
+        );
+      }
+      if (!Number.isFinite(createdAt)) {
+        return new Response(JSON.stringify({ ok: false, error: 'Invalid createdAt' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
 
       try {
         const purchase = await createPremiumPurchase(env.DB, {
@@ -148,10 +165,14 @@ export default {
           headers: { 'content-type': 'application/json' }
         });
       } catch (error) {
+        const isUnknownSku = error.message === UNKNOWN_PREMIUM_SKU_ERROR;
+        const status = isUnknownSku ? 400 : 500;
+        const errorMessage = isUnknownSku ? UNKNOWN_PREMIUM_SKU_ERROR : 'Failed to create purchase';
+        const responseBody = { ok: false, error: errorMessage };
         return new Response(
-          JSON.stringify({ ok: false, error: 'Failed to persist purchase', detail: error.message }),
+          JSON.stringify(responseBody),
           {
-            status: 500,
+            status,
             headers: { 'content-type': 'application/json' }
           }
         );

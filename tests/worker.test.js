@@ -134,3 +134,39 @@ test('worker creates premium purchase without rewarding patron after cap reached
   assert.ok(db.statements.some((s) => /INSERT INTO purchases/.test(s.sql)));
   assert.equal(db.statements.some((s) => /INSERT INTO credits_ledger/.test(s.sql)), false);
 });
+
+test('worker requires userId and sku for purchase requests', async () => {
+  const db = createMockDb();
+  const req = new Request('https://worker.example/purchase', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ patronUserId: 'patron-1' })
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error, 'Missing required fields: userId and sku');
+  assert.equal(db.statements.length, 0);
+});
+
+test('worker returns 400 for unknown premium sku', async () => {
+  const db = createMockDb({ firstResponses: [null] });
+  const req = new Request('https://worker.example/purchase', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'buyer-3',
+      sku: 'unknown_sku',
+      patronUserId: 'patron-3'
+    })
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error, 'Unknown premium sku');
+  assert.equal(db.statements.some((s) => /INSERT INTO purchases/.test(s.sql)), false);
+});

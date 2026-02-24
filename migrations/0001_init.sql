@@ -53,4 +53,4 @@ CREATE TABLE IF NOT EXISTS premium_skus (
 INSERT OR REPLACE INTO premium_skus
   (sku, display_name, price_cents, patron_reward_cents, patron_cap_cents)
 VALUES
-  ("premium_isotope", "Premium Filterable Portfolio (Isotope)", 2500, 200, 2500);
+  ('premium_isotope', 'Premium Filterable Portfolio (Isotope)', 2500, 200, 2500);
