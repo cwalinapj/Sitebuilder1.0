@@ -27,3 +27,8 @@ Before first deploy, create the Vectorize indexes (768 dimensions, cosine metric
 ```bash
 npm run vectorize:create
 ```
+
+Worker API supports:
+- `POST /design-sample` to insert template or real-site `DesignSample` entries into the `DESIGN_CATALOG` Vectorize index.
+- `POST /event` to persist preference events in D1 and semantic memory in `USER_MEM`/`GLOBAL_TRENDS`.
+- `POST /recommend` to retrieve the next 2–3 diverse catalog candidates with drill-down questions and optional upsell metadata.
