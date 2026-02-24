@@ -1,0 +1,23 @@
+name = "sitebuilder-agent"
+main = "src/worker.ts"
+compatibility_date = "2026-02-24"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sitebuilder"
+database_id = "REPLACE_AFTER_CREATE"
+
+[[vectorize]]
+binding = "USER_MEM"
+index_name = "user-memory"
+
+[[vectorize]]
+binding = "GLOBAL_TRENDS"
+index_name = "global-trends"
+
+[[vectorize]]
+binding = "DESIGN_CATALOG"
+index_name = "design-catalog"
+
+[ai]
+binding = "AI"
