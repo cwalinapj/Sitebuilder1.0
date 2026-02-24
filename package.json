@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "vectorize:create:user-memory": "npx wrangler@latest vectorize create user-memory --dimensions=768 --metric=cosine",
+    "vectorize:create:global-trends": "npx wrangler@latest vectorize create global-trends --dimensions=768 --metric=cosine",
+    "vectorize:create:design-catalog": "npx wrangler@latest vectorize create design-catalog --dimensions=768 --metric=cosine",
+    "vectorize:create": "npm run vectorize:create:user-memory && npm run vectorize:create:global-trends && npm run vectorize:create:design-catalog"
   }
 }
