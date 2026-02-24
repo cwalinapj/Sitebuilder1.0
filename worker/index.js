@@ -59,10 +59,106 @@ async function updateTasteProfile(db, { userId, type, timestamp }) {
     .run();
 }
 
+async function getPremiumSku(db, sku) {
+  return db
+    .prepare(
+      'SELECT sku, price_cents, patron_reward_cents, patron_cap_cents FROM premium_skus WHERE sku = ?1'
+    )
+    .bind(sku)
+    .first();
+}
+
+async function getPatronRewardTotal(db, { patronUserId, sku }) {
+  const row = await db
+    .prepare(
+      "SELECT COALESCE(SUM(delta_cents), 0) AS total_rewarded FROM credits_ledger WHERE user_id = ?1 AND reason = 'patron_reward' AND ref_id = ?2"
+    )
+    .bind(patronUserId, sku)
+    .first();
+  return Number(row?.total_rewarded || 0);
+}
+
+async function createPremiumPurchase(db, { userId, sku, patronUserId, createdAt }) {
+  const premiumSku = await getPremiumSku(db, sku);
+  if (!premiumSku) {
+    throw new Error('Unknown premium sku');
+  }
+
+  const purchaseId = crypto.randomUUID();
+  await db
+    .prepare(
+      'INSERT INTO purchases (purchase_id, user_id, sku, amount_usd_cents, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
+    )
+    .bind(purchaseId, userId, sku, premiumSku.price_cents, 'paid', createdAt)
+    .run();
+
+  let patronRewardCents = 0;
+  if (patronUserId) {
+    const totalRewarded = await getPatronRewardTotal(db, { patronUserId, sku });
+    const rewardRemaining = Math.max(0, premiumSku.patron_cap_cents - totalRewarded);
+    patronRewardCents = Math.min(premiumSku.patron_reward_cents, rewardRemaining);
+
+    if (patronRewardCents > 0) {
+      await db
+        .prepare(
+          'INSERT INTO credits_ledger (ledger_id, user_id, reason, delta_cents, ref_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
+        )
+        .bind(
+          crypto.randomUUID(),
+          patronUserId,
+          'patron_reward',
+          patronRewardCents,
+          sku,
+          createdAt
+        )
+        .run();
+    }
+  }
+
+  return {
+    purchaseId,
+    amountCents: premiumSku.price_cents,
+    patronRewardCents
+  };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method !== 'POST' || url.pathname !== '/events') {
+    if (request.method !== 'POST') {
+      return new Response('Not found', { status: 404 });
+    }
+
+    if (url.pathname === '/purchase') {
+      const body = await request.json();
+      const userId = body.userId || 'anonymous';
+      const sku = body.sku || 'premium_isotope';
+      const patronUserId = body.patronUserId || null;
+      const createdAt = Number(body.createdAt) || Date.now();
+
+      try {
+        const purchase = await createPremiumPurchase(env.DB, {
+          userId,
+          sku,
+          patronUserId,
+          createdAt
+        });
+        return new Response(JSON.stringify({ ok: true, ...purchase }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: 'Failed to persist purchase', detail: error.message }),
+          {
+            status: 500,
+            headers: { 'content-type': 'application/json' }
+          }
+        );
+      }
+    }
+
+    if (url.pathname !== '/events') {
       return new Response('Not found', { status: 404 });
     }
 
@@ -101,4 +197,11 @@ export default {
   }
 };
 
-export { storeSemanticMemory, updateTasteProfile, EVENT_COUNTER_COLUMNS };
+export {
+  storeSemanticMemory,
+  updateTasteProfile,
+  EVENT_COUNTER_COLUMNS,
+  getPremiumSku,
+  getPatronRewardTotal,
+  createPremiumPurchase
+};

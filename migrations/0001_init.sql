@@ -49,3 +49,8 @@ CREATE TABLE IF NOT EXISTS premium_skus (
   patron_reward_cents INTEGER NOT NULL, -- how much to pay patron per subsequent purchase
   patron_cap_cents INTEGER NOT NULL     -- hard cap (keeps it from sounding like “income stream”)
 );
+
+INSERT OR REPLACE INTO premium_skus
+  (sku, display_name, price_cents, patron_reward_cents, patron_cap_cents)
+VALUES
+  ("premium_isotope", "Premium Filterable Portfolio (Isotope)", 2500, 200, 2500);

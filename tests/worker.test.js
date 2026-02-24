@@ -3,8 +3,9 @@ import test from 'node:test';
 
 import worker, { EVENT_COUNTER_COLUMNS } from '../worker/index.js';
 
-function createMockDb() {
+function createMockDb({ firstResponses = [] } = {}) {
   const statements = [];
+  const selectQueue = [...firstResponses];
 
   return {
     statements,
@@ -15,6 +16,10 @@ function createMockDb() {
             async run() {
               statements.push({ sql, params });
               return { success: true };
+            },
+            async first() {
+              statements.push({ sql, params, read: true });
+              return selectQueue.shift() ?? null;
             }
           };
         }
@@ -62,4 +67,70 @@ test('worker rejects unsupported event types', async () => {
   assert.equal(response.status, 400);
   assert.equal(body.error, 'Invalid event type');
   assert.equal(db.statements.length, 0);
+});
+
+test('worker creates premium purchase and rewards patron within cap', async () => {
+  const db = createMockDb({
+    firstResponses: [
+      {
+        sku: 'premium_isotope',
+        price_cents: 2500,
+        patron_reward_cents: 200,
+        patron_cap_cents: 2500
+      },
+      { total_rewarded: 2300 }
+    ]
+  });
+  const req = new Request('https://worker.example/purchase', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'buyer-1',
+      patronUserId: 'patron-1',
+      sku: 'premium_isotope',
+      createdAt: 1704067200000
+    })
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.amountCents, 2500);
+  assert.equal(body.patronRewardCents, 200);
+  assert.ok(body.purchaseId);
+  assert.ok(db.statements.some((s) => /INSERT INTO purchases/.test(s.sql)));
+  assert.ok(db.statements.some((s) => /INSERT INTO credits_ledger/.test(s.sql)));
+});
+
+test('worker creates premium purchase without rewarding patron after cap reached', async () => {
+  const db = createMockDb({
+    firstResponses: [
+      {
+        sku: 'premium_isotope',
+        price_cents: 2500,
+        patron_reward_cents: 200,
+        patron_cap_cents: 2500
+      },
+      { total_rewarded: 2500 }
+    ]
+  });
+  const req = new Request('https://worker.example/purchase', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'buyer-2',
+      patronUserId: 'patron-2',
+      sku: 'premium_isotope',
+      createdAt: 1704067200000
+    })
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.patronRewardCents, 0);
+  assert.ok(db.statements.some((s) => /INSERT INTO purchases/.test(s.sql)));
+  assert.equal(db.statements.some((s) => /INSERT INTO credits_ledger/.test(s.sql)), false);
 });
