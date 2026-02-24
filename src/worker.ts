@@ -158,8 +158,8 @@ function compareQuestion(candidates: any[]) {
   if (candidates.length < 2) {
     return "Do you prefer cleaner typography or richer color contrast next?";
   }
-  const a = candidates[0].meta ?? {};
-  const b = candidates[1].meta ?? {};
+  const a = candidates[0].meta ?? candidates[0].metadata ?? {};
+  const b = candidates[1].meta ?? candidates[1].metadata ?? {};
   if (a.font_guess && b.font_guess && a.font_guess !== b.font_guess) {
     return `Font preference: ${a.font_guess} vs ${b.font_guess}?`;
   }
@@ -174,7 +174,7 @@ function compareQuestion(candidates: any[]) {
 function shouldOfferIsotope(userSignals: any[]): boolean {
   // Offer only after repeated portfolio/sort/filter signals.
   const hay = JSON.stringify(userSignals).toLowerCase();
-  const matches = hay.match(/portfolio|filter|isotope|sortable|masonry/g) ?? [];
+  const matches = hay.match(/\b(portfolio|filter|isotope|sortable|masonry)\b/g) ?? [];
   return matches.length >= 2;
 }
 
