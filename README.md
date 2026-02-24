@@ -30,6 +30,8 @@ npx wrangler deploy
 
 ### Smoke test
 
+Replace `YOUR_WORKER_URL` with the Worker URL printed by `npx wrangler deploy` (for example, `sitebuilder-agent.<subdomain>.workers.dev`).
+
 ```bash
 curl -s -X POST "https://YOUR_WORKER_URL/event" \
   -H "content-type: application/json" \
