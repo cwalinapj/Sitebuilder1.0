@@ -21,3 +21,13 @@ python3 -m unittest discover -s src/tests -t . -p 'test_*.py'
 ## Deployment
 
 GitHub Actions workflow at `.github/workflows/pages.yml` builds `/site` and deploys to Cloudflare Pages when the required secrets are configured.
+
+## Cloudflare D1 setup
+
+Migrations live in `migrations/*.sql` and are applied with Wrangler:
+
+```bash
+npx wrangler d1 create sitebuilder
+# copy the printed database_id into wrangler.toml (database_id=...)
+npx wrangler d1 migrations apply sitebuilder
+```
