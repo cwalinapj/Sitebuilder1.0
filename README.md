@@ -21,3 +21,9 @@ python3 -m unittest discover -s src/tests -t . -p 'test_*.py'
 ## Deployment
 
 GitHub Actions workflow at `.github/workflows/pages.yml` builds `/site` and deploys to Cloudflare Pages when the required secrets are configured.
+
+Before first deploy, create the Vectorize indexes (768 dimensions, cosine metric):
+
+```bash
+npm run vectorize:create
+```
