@@ -8,6 +8,8 @@ Static site builder that reads `business_profile.json`, auto-categorizes the bus
 python3 src/build.py
 ```
 
+Build guided demo preview pages from `session_state.json` candidates:
+
 ```bash
 python3 src/build_preview.py
 ```
