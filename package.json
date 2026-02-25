@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "dev:onboarding": "npx wrangler@latest dev",
+    "dev:inspector": "npx wrangler@latest dev --config SitebuilderInspector/wrangler.toml",
     "vectorize:create:user-memory": "npx wrangler@latest vectorize create user-memory --dimensions=768 --metric=cosine",
     "vectorize:create:global-trends": "npx wrangler@latest vectorize create global-trends --dimensions=768 --metric=cosine",
     "vectorize:create:design-catalog": "npx wrangler@latest vectorize create design-catalog --dimensions=768 --metric=cosine",

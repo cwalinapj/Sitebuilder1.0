@@ -6,3 +6,9 @@ compatibility_date = "2026-02-24"
 binding = "DB"
 database_name = "Onboarding_AI_Agent"
 database_id = "6829390f-6695-4f75-8ebb-d367150981ca"
+
+[vars]
+CORS_ALLOWED_ORIGINS = "https://app.cardetailingreno.com"
+
+# Optional:
+# wrangler secret put OPENAI_API_KEY

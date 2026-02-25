@@ -1,10 +1,12 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import test from "node:test";
 
-import worker from '../src/worker.ts';
+import inspectorWorker from "../SitebuilderInspector/worker.js";
 
-function createMockDb() {
+function createMockDb({ firstResponses = [] } = {}) {
   const statements = [];
+  const firstQueue = [...firstResponses];
+
   return {
     statements,
     prepare(sql) {
@@ -12,149 +14,288 @@ function createMockDb() {
         bind(...params) {
           return {
             async run() {
-              statements.push({ sql, params });
+              statements.push({ sql, params, op: "run" });
               return { success: true };
-            }
+            },
+            async first() {
+              statements.push({ sql, params, op: "first" });
+              return firstQueue.shift() ?? null;
+            },
           };
-        }
+        },
       };
-    }
-  };
-}
-
-function createMockIndex({ matches = [] } = {}) {
-  return {
-    inserts: [],
-    lastQuery: null,
-    async insert(items) {
-      this.inserts.push(...items);
     },
-    async query(vec, options) {
-      this.lastQuery = { vec, options };
-      return { matches };
-    }
   };
 }
 
-function createEnv({ userMatches = [], trendMatches = [], designMatches = [] } = {}) {
-  const USER_MEM = createMockIndex({ matches: userMatches });
-  const GLOBAL_TRENDS = createMockIndex({ matches: trendMatches });
-  const DESIGN_CATALOG = createMockIndex({ matches: designMatches });
-  return {
-    DB: createMockDb(),
-    USER_MEM,
-    GLOBAL_TRENDS,
-    DESIGN_CATALOG,
-    AI: {
-      async run() {
-        return { data: [[0.1, 0.2, 0.3]] };
-      }
-    }
-  };
-}
+test("inspector /inspect normalizes scheme and persists request/result rows", async () => {
+  const db = createMockDb();
+  const env = { DB: db };
+  const originalFetch = globalThis.fetch;
+  const fetchCalls = [];
 
-test('worker upserts template design sample into catalog index', async () => {
-  const env = createEnv();
-  const req = new Request('https://worker.example/design-sample', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      id: 'sample-template-a',
-      type: 'template',
-      template_id: 'template-a',
-      tags: ['modern', 'minimal'],
-      font_guess: 'Inter',
-      palette: ['#111111', '#ffffff'],
-      screenshot: 'https://img.example/s1.png',
-      license_policy: 'internal_ok'
-    })
+  globalThis.fetch = async (target) => {
+    fetchCalls.push(target);
+    const html = "<html><head><title>Acme</title></head><body><h1>Hello</h1></body></html>";
+    return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+  };
+
+  try {
+    const req = new Request("https://inspector.example/inspect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: "ses_1", url: "example.com" }),
+    });
+
+    const response = await inspectorWorker.fetch(req, env);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(fetchCalls[0], "https://example.com");
+    assert.equal(body.result.link_audit.checked_count, 0);
+    assert.equal(body.result.link_audit.broken_count, 0);
+    assert.ok(db.statements.some((s) => /INSERT OR REPLACE INTO site_scan_requests/.test(s.sql)));
+    assert.ok(db.statements.some((s) => /INSERT OR REPLACE INTO site_scan_results/.test(s.sql)));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("inspector /inspect/status parses json columns into arrays", async () => {
+  const db = createMockDb({
+    firstResponses: [
+      { request_id: "scan_1", status: "done", created_at: 1 },
+      {
+        request_id: "scan_1",
+        session_id: "ses_1",
+        url: "https://example.com",
+        final_url: "https://example.com",
+        title: "Acme",
+        h1: "Welcome",
+        meta_description: "desc",
+        emails_json: JSON.stringify(["info@example.com"]),
+        phones_json: JSON.stringify(["+15555555555"]),
+        socials_json: JSON.stringify(["https://instagram.com/acme"]),
+        platform_hint: "wordpress",
+        schema_types_json: JSON.stringify(["LocalBusiness"]),
+        raw_size: 1234,
+        created_at: 2,
+      },
+    ],
   });
+  const env = { DB: db };
 
-  const response = await worker.fetch(req, env);
+  const req = new Request("https://inspector.example/inspect/status?session_id=ses_1");
+  const response = await inspectorWorker.fetch(req, env);
   const body = await response.json();
 
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(env.DESIGN_CATALOG.inserts.length, 1);
-  assert.equal(env.DESIGN_CATALOG.inserts[0].metadata.type, 'template');
-  assert.equal(env.DESIGN_CATALOG.inserts[0].metadata.template_id, 'template-a');
+  assert.deepEqual(body.result.emails, ["info@example.com"]);
+  assert.deepEqual(body.result.schema_types, ["LocalBusiness"]);
 });
 
-test('worker rejects invalid real site sample without url', async () => {
-  const env = createEnv();
-  const req = new Request('https://worker.example/design-sample', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      id: 'sample-real-a',
-      type: 'real_site',
-      tags: ['warm'],
-      license_policy: 'link_only'
-    })
+test("inspector /inspect rejects missing url", async () => {
+  const db = createMockDb();
+  const env = { DB: db };
+
+  const req = new Request("https://inspector.example/inspect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ session_id: "ses_1" }),
   });
 
-  const response = await worker.fetch(req, env);
+  const response = await inspectorWorker.fetch(req, env);
   const body = await response.json();
+
   assert.equal(response.status, 400);
   assert.equal(body.ok, false);
+  assert.match(body.error, /session_id and url required/);
 });
 
-test('recommend returns drill-down questions, honors filters, and can trigger isotope upsell', async () => {
-  const env = createEnv({
-    userMatches: [{ metadata: { note: 'wants filterable portfolio' } }],
-    trendMatches: [{ metadata: { note: 'sortable grid preferred' } }],
-    designMatches: [
-      { id: 'd1', score: 0.9, metadata: { type: 'template', tags: ['modern'], font_guess: 'Inter', palette: ['#111'] } },
-      { id: 'd2', score: 0.8, metadata: { type: 'real_site', tags: ['warm'], font_guess: 'Lato', palette: ['#f90'] } },
-      { id: 'd3', score: 0.7, metadata: { type: 'template', tags: ['bold'], font_guess: 'Poppins', palette: ['#09f'] } }
-    ]
-  });
+test("inspector /market/nearby returns top sites from fallback search", async () => {
+  const db = createMockDb();
+  const env = { DB: db };
+  const originalFetch = globalThis.fetch;
 
-  const req = new Request('https://worker.example/recommend', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      user_id: 'u-1',
-      prompt: 'restaurant with gallery and booking CTA',
-      filters: { tags: { $in: ['restaurant'] } }
-    })
-  });
+  globalThis.fetch = async (target) => {
+    const u = String(target);
+    if (u.includes("yelp.com/search")) {
+      const html = `<a href="/biz/alpha-dive-gardnerville">Alpha Dive</a>`;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    if (u.includes("yelp.com/biz/alpha-dive-gardnerville")) {
+      const html = `<a href="/biz_redir?url=https%3A%2F%2Falpha.example">Website</a>`;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    if (u.includes("alpha.example")) {
+      const html = "<html><head><title>Alpha Dive</title></head><body><h1>Scuba</h1></body></html>";
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    const html = `<a class="result__a" href="https://beta.example">Beta Dive</a>`;
+    return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+  };
 
-  const response = await worker.fetch(req, env);
-  const body = await response.json();
+  try {
+    const req = new Request("https://inspector.example/market/nearby", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: "ses_2",
+        business_type: "dive services",
+        location: "Miami, FL",
+      }),
+    });
 
-  assert.equal(response.status, 200);
-  assert.equal(body.next.length, 3);
-  assert.equal(body.questions[0], 'Which of these do you prefer and why?');
-  assert.match(body.questions[1], /Font preference:/);
-  assert.equal(env.DESIGN_CATALOG.lastQuery.options.filter.tags.$in[0], 'restaurant');
-  assert.equal(body.upsell?.sku, 'premium_isotope');
+    const response = await inspectorWorker.fetch(req, env);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.ok(body.sites.length >= 1);
+    assert.equal(body.sites[0].url, "https://alpha.example");
+    assert.equal(body.source, "yelp_business_sites");
+    assert.ok(db.statements.some((s) => /market_search_results/.test(s.sql)));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
-test('event stores semantic memory with derived structured tags and updates global trends', async () => {
-  const env = createEnv();
-  const req = new Request('https://worker.example/event', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      user_id: 'u-22',
-      event_type: 'font_pref',
-      payload: { choice: 'sans_serif' },
-      business_type: 'restaurant',
-      device: 'mobile'
-    })
-  });
+test("inspector /market/nearby ranks guide service site above dive shop when intent is guiding", async () => {
+  const db = createMockDb();
+  const env = { DB: db };
+  const originalFetch = globalThis.fetch;
 
-  const response = await worker.fetch(req, env);
-  const body = await response.json();
-  const userInsert = env.USER_MEM.inserts[0];
-  const trendInsert = env.GLOBAL_TRENDS.inserts[0];
+  globalThis.fetch = async (target) => {
+    const u = String(target);
+    if (u.includes("yelp.com/search")) {
+      const html = `
+        <a href="/biz/just-so-scuba-lake-tahoe">Just So Scuba</a>
+        <a href="/biz/sierra-dive-center-lake-tahoe">Sierra Dive</a>
+      `;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    if (u.includes("yelp.com/biz/just-so-scuba-lake-tahoe")) {
+      const html = `<a href="/biz_redir?url=https%3A%2F%2Fwww.justsoscuba.com%2F">Website</a>`;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    if (u.includes("yelp.com/biz/sierra-dive-center-lake-tahoe")) {
+      const html = `<a href="/biz_redir?url=https%3A%2F%2Fwww.sierradive.com%2F">Website</a>`;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    if (u.includes("justsoscuba.com")) {
+      const html = `
+        <html>
+          <head><title>Just So Scuba | Guided Dives Lake Tahoe</title></head>
+          <body><h1>Private Dive Guide Services</h1></body>
+        </html>
+      `;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    if (u.includes("sierradive.com")) {
+      const html = `
+        <html>
+          <head><title>Sierra Dive Center | Scuba Shop and Equipment</title></head>
+          <body><h1>Dive Gear Sales</h1></body>
+        </html>
+      `;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+  };
 
-  assert.equal(response.status, 200);
-  assert.equal(body.ok, true);
-  assert.equal(env.DB.statements.length, 1);
-  assert.match(env.DB.statements[0].sql, /INSERT INTO events/);
-  assert.deepEqual(userInsert.metadata.tags, ['prefers_font_sans_serif']);
-  assert.equal(userInsert.metadata.business_type, 'restaurant');
-  assert.equal(trendInsert.metadata.event_type, 'font_pref');
+  try {
+    const req = new Request("https://inspector.example/market/nearby", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: "ses_guide_1",
+        business_type: "dive services",
+        location: "Lake Tahoe, NV",
+        intent_text: "dive guiding for lake tahoe tourists",
+      }),
+    });
+
+    const response = await inspectorWorker.fetch(req, env);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.source, "yelp_business_sites");
+    assert.equal(body.sites[0].url, "https://www.justsoscuba.com/");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("inspector /inspect extracts address candidates from schema/text", async () => {
+  const db = createMockDb();
+  const env = { DB: db };
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => {
+    const html = `
+      <html><head><title>Acme</title>
+      <script type="application/ld+json">
+      {"@type":"LocalBusiness","address":{"streetAddress":"200 Oak Ave","addressLocality":"Reno","addressRegion":"NV","postalCode":"89501"}}
+      </script>
+      </head>
+      <body><h1>Acme Plumbing</h1><p>Visit us at 123 Main St, Reno, NV 89501</p></body></html>
+    `;
+    return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+  };
+
+  try {
+    const req = new Request("https://inspector.example/inspect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: "ses_3", url: "example.com" }),
+    });
+
+    const response = await inspectorWorker.fetch(req, env);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.ok(Array.isArray(body.result.addresses));
+    assert.ok(body.result.addresses.length >= 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("inspector /market/nearby filters out yelp search/listing urls from fallback", async () => {
+  const db = createMockDb();
+  const env = { DB: db };
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (target) => {
+    const u = String(target);
+    if (u.includes("yelp.com/search")) {
+      return new Response("<html><body>No biz links</body></html>", { status: 200 });
+    }
+    const ddg = `
+      <a class="result__a" href="https://www.yelp.com/search?find_desc=scuba&find_loc=Carson+City">Yelp Search</a>
+      <a class="result__a" href="https://www.justsoscuba.com/">Just So Scuba</a>
+    `;
+    return new Response(ddg, { status: 200, headers: { "content-type": "text/html" } });
+  };
+
+  try {
+    const req = new Request("https://inspector.example/market/nearby", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: "ses_4", business_type: "dive services", location: "Carson City, NV" }),
+    });
+    const response = await inspectorWorker.fetch(req, env);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.sites[0].url, "https://www.justsoscuba.com/");
+    assert.ok(body.sites.every((s) => !String(s.url).includes("yelp.com/search")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

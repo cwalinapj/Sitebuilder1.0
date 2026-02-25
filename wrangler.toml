@@ -6,6 +6,10 @@ compatibility_date = "2026-02-24"
 binding = "seo_ai_apify_raw"
 bucket_name = "seo-ai-apify-raw"
 
+[[r2_buckets]]
+binding = "CONVO_BUCKET"
+bucket_name = "sitebuilder-convos"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "Onboarding_AI_Agent"
@@ -13,3 +17,44 @@ database_id = "6829390f-6695-4f75-8ebb-d367150981ca"
 
 [ai]
 binding = "AI"
+
+[[services]]
+binding = "INSPECTOR"
+service = "sitebuilder-inspector"
+
+[vars]
+# Optional fallback if service binding is unavailable in your environment.
+# Example: INSPECTOR_BASE_URL = "https://sitebuilder-inspector.<account>.workers.dev"
+INSPECTOR_BASE_URL = "https://inspector.cardetailingreno.com"
+    # Optional public base URL for demo HTML stored in R2.
+    # Example: DEMO_PUBLIC_BASE_URL = "https://demo-cdn.sitebuilder1-03.pages.dev"
+    DEMO_PUBLIC_BASE_URL = ""
+    # Optional cache directives for generated demo HTML/assets in R2.
+    DEMO_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+    DEMO_HTML_CACHE_CONTROL = "public, max-age=120"
+    # Funnel CTA URLs for post-demo conversion actions.
+    CONNECT_CLOUDFLARE_URL = "https://app.cardetailingreno.com/connect-cloudflare"
+    MIGRATE_HOSTING_URL = "https://app.cardetailingreno.com/migrate-hosting"
+    DUAL_SERVER_UPGRADE_URL = "https://app.cardetailingreno.com/upgrade/dual-server"
+    UPGRADE_PAYPAL_URL = "https://app.cardetailingreno.com/upgrade/paypal"
+    UPGRADE_CRYPTO_URL = "https://app.cardetailingreno.com/upgrade/crypto"
+    FREE_VPS_BRIDGE_URL = "https://app.cardetailingreno.com/upgrade/free-vps-bridge"
+    FREE_VPS_OFFER_WINDOW_DAYS = "30"
+    PLUGIN_FREE_URL = "https://app.cardetailingreno.com/plugin-free"
+TOLLDNS_URL = "https://app.cardetailingreno.com/tolldns-install"
+GITHUB_SIGNUP_URL = "https://github.com/signup"
+# Optional comma-separated extra frontend origins for CORS.
+CORS_ALLOWED_ORIGINS = "https://app.cardetailingreno.com"
+# Monthly traffic threshold used as an upgrade signal.
+UPGRADE_TRAFFIC_THRESHOLD = "2000"
+# Optional public Turnstile site key for frontend challenge.
+TURNSTILE_SITE_KEY = ""
+
+# Optional secret:
+# wrangler secret put OPENAI_API_KEY
+# Optional secret:
+# wrangler secret put WP_PLUGIN_SHARED_SECRET
+# Optional secret (for encrypting provider tokens in access vault):
+# wrangler secret put CREDENTIAL_VAULT_KEY
+# Optional secret:
+# wrangler secret put TURNSTILE_SECRET_KEY
