@@ -2,6 +2,25 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // --- CORS (fix for browser fetch from Pages) ---
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "https://sitebuilder1-03.pages.dev", // <-- your Pages origin
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+// Preflight
+if (request.method === "OPTIONS") {
+  return new Response(null, { status: 204, headers: corsHeaders });
+}
+
+// JSON helper (ALWAYS use this for responses)
+const json = (obj, status = 200) =>
+  new Response(JSON.stringify(obj, null, 2), {
+    status,
+    headers: { "content-type": "application/json", ...corsHeaders },
+  });
 
     // ---- helpers ----
     const json = (obj, status = 200) =>
