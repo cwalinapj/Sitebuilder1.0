@@ -4,8 +4,8 @@ compatibility_date = "2026-02-24"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "sitebuilder"
-database_id = "REPLACE_AFTER_CREATE"
+database_name = "SEO_AI_Agent"
+database_id = "e5b22404-32e9-4a5c-a890-1effb9266c9c"
 
 [[vectorize]]
 binding = "USER_MEM"
