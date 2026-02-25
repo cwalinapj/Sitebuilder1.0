@@ -90,7 +90,7 @@ const newId = (prefix) => `${prefix}_${crypto.randomUUID()}`;
         return json({ ok: false, error: "Invalid JSON" }, 400);
       }
 
-      const first_name = String(body?.first_name || "").trim();
+      const first_name = String(body?Can I please get your .first_name || "").trim();
       if (!first_name) return json({ ok: false, error: "first_name required" }, 400);
 
       const user_id = newId("usr");
