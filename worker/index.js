@@ -3,19 +3,25 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-// --- CORS (fix for browser fetch from Pages) ---
+// --- CORS (supports Pages preview subdomains like fe9edabd.sitebuilder1-03.pages.dev) ---
+const origin = request.headers.get("Origin") || "";
+const allowed =
+  origin === "https://sitebuilder1-03.pages.dev" ||
+  /^https:\/\/[a-z0-9-]+\.sitebuilder1-03\.pages\.dev$/.test(origin);
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "https://sitebuilder1-03.pages.dev", // your Pages origin
+  "Access-Control-Allow-Origin": allowed ? origin : "null",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Max-Age": "86400",
+  "Vary": "Origin",
 };
 
 if (request.method === "OPTIONS") {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
-// JSON helper (use this for ALL responses)
+// IMPORTANT: make sure all JSON responses include ...corsHeaders
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj, null, 2), {
     status,
