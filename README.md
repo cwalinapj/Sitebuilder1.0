@@ -22,22 +22,13 @@ python3 -m unittest discover -s src/tests -t . -p 'test_*.py'
 
 GitHub Actions workflow at `.github/workflows/pages.yml` builds `/site` and deploys to Cloudflare Pages when the required secrets are configured.
 
-### Deploy Worker
+Before first deploy, create the Vectorize indexes (768 dimensions, cosine metric):
 
 ```bash
-npx wrangler deploy
+npm run vectorize:create
 ```
 
-### Smoke test
-
-Replace `YOUR_WORKER_URL` with the Worker URL printed by `npx wrangler deploy` (for example, `sitebuilder-agent.<subdomain>.workers.dev`).
-
-```bash
-curl -s -X POST "https://YOUR_WORKER_URL/event" \
-  -H "content-type: application/json" \
-  -d '{"user_id":"u1","session_id":"s1","event_type":"like","payload":{"tags":["portfolio","filterable_grid"]}}'
-
-curl -s -X POST "https://YOUR_WORKER_URL/recommend" \
-  -H "content-type: application/json" \
-  -d '{"user_id":"u1","prompt":"show me more modern portfolio grids with filtering"}'
-```
+Worker API supports:
+- `POST /design-sample` to insert template or real-site `DesignSample` entries into the `DESIGN_CATALOG` Vectorize index.
+- `POST /event` to persist preference events in D1 and semantic memory in `USER_MEM`/`GLOBAL_TRENDS`.
+- `POST /recommend` to retrieve the next 2–3 diverse catalog candidates with drill-down questions and optional upsell metadata.
