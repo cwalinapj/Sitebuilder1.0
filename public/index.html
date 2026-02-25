@@ -7,7 +7,7 @@
   <style>
     body { font-family: system-ui; max-width: 720px; margin: 24px auto; padding: 0 12px; }
     #chat { border: 1px solid #ddd; border-radius: 10px; padding: 12px; height: 60vh; overflow:auto; }
-    .msg { margin: 10px 0; }
+    .msg { margin: 10px 0; white-space: pre-wrap; }
     .ai { color: #111; }
     .me { color: #0b5; text-align: right; }
     form { display:flex; gap:8px; margin-top: 10px; }
@@ -42,38 +42,66 @@
     }
 
     async function start() {
-      const firstName = prompt("First name?");
-      const r = await fetch(`${WORKER_BASE}/q1/start`, {
-        method: "POST",
-        headers: {"content-type":"application/json"},
-        body: JSON.stringify({ first_name: firstName })
-      });
-      const data = await r.json();
-      sessionId = data.session_id;
-      state = data.next_state;
-      addMsg("ai", data.prompt);
+      const firstName = (prompt("First Name?") || "").trim();
+      const lastName  = (prompt("Last Name?") || "").trim();
+
+      if (!firstName || !lastName) {
+        addMsg("ai", "Please refresh and enter both First Name and Last Name to begin.");
+        return;
+      }
+
+      try {
+        const r = await fetch(`${WORKER_BASE}/q1/start`, {
+          method: "POST",
+          headers: {"content-type":"application/json"},
+          body: JSON.stringify({ FirstName: firstName, LastName: lastName })
+        });
+
+        const data = await r.json();
+        if (!data.ok) {
+          addMsg("ai", "Start error: " + (data.error || "unknown"));
+          return;
+        }
+
+        sessionId = data.session_id;
+        state = data.next_state;
+        addMsg("ai", data.prompt);
+      } catch (e) {
+        addMsg("ai", "Network/CORS error starting session. Check DevTools console.");
+      }
     }
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
+
+      if (!sessionId || !state) {
+        addMsg("ai", "Session not started yet. Refresh the page to begin.");
+        return;
+      }
+
       input.value = "";
       addMsg("me", text);
 
-      const r = await fetch(`${WORKER_BASE}/q1/answer`, {
-        method: "POST",
-        headers: {"content-type":"application/json"},
-        body: JSON.stringify({ session_id: sessionId, state, answer: text })
-      });
+      try {
+        const r = await fetch(`${WORKER_BASE}/q1/answer`, {
+          method: "POST",
+          headers: {"content-type":"application/json"},
+          body: JSON.stringify({ session_id: sessionId, state, answer: text })
+        });
 
-      const data = await r.json();
-      if (!data.ok) {
-        addMsg("ai", "Error: " + (data.error || "unknown"));
-        return;
+        const data = await r.json();
+        if (!data.ok) {
+          addMsg("ai", "Error: " + (data.error || "unknown"));
+          return;
+        }
+
+        state = data.next_state;
+        addMsg("ai", data.prompt);
+      } catch (e) {
+        addMsg("ai", "Network/CORS error sending message. Check DevTools console.");
       }
-      state = data.next_state;
-      addMsg("ai", data.prompt);
     });
 
     start();
