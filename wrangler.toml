@@ -7,9 +7,9 @@ binding = "seo_ai_apify_raw"
 bucket_name = "seo-ai-apify-raw"
 
 [[d1_databases]]
-binding = "DB"
-database_name = "SEO_AI_Agent"
-database_id = "e5b22404-32e9-4a5c-a890-1effb9266c9c"
+binding = "Onboarding_AI_Agent"
+database_name = "Onboarding_AI_Agent"
+database_id = "6829390f-6695-4f75-8ebb-d367150981ca"
 
 [[vectorize]]
 binding = "USER_MEM"
