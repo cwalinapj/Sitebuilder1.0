@@ -8,6 +8,10 @@ Static site builder that reads `business_profile.json`, auto-categorizes the bus
 python3 src/build.py
 ```
 
+```bash
+python3 src/build_preview.py
+```
+
 ## Test
 
 ```bash
