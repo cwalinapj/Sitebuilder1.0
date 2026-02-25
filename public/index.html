@@ -5,41 +5,373 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Sitebuilder Chat</title>
   <style>
-    body { font-family: system-ui; max-width: 720px; margin: 24px auto; padding: 0 12px; }
-    #chat { border: 1px solid #ddd; border-radius: 10px; padding: 12px; height: 60vh; overflow:auto; }
-    .msg { margin: 10px 0; white-space: pre-wrap; }
+    body { font-family: system-ui; max-width: 780px; margin: 24px auto; padding: 0 12px; }
+    #chat { border: 1px solid #ddd; border-radius: 12px; padding: 12px; height: 65vh; overflow:auto; background: #fff; }
+    .msg { margin: 10px 0; white-space: pre-wrap; line-height: 1.35; }
     .ai { color: #111; }
     .me { color: #0b5; text-align: right; }
+    .bubble { display:inline-block; padding: 10px 12px; border-radius: 12px; max-width: 92%; }
+    .ai .bubble { background: #f6f6f6; }
+    .me .bubble { background: #eafff2; }
+    a { color: inherit; text-decoration: underline; }
     form { display:flex; gap:8px; margin-top: 10px; }
-    input { flex:1; padding: 10px; border-radius: 8px; border:1px solid #ddd; }
-    button { padding: 10px 14px; border-radius: 8px; border:1px solid #ddd; background:#f6f6f6; }
+    input { flex:1; padding: 12px; border-radius: 10px; border:1px solid #ddd; }
+    button { padding: 12px 14px; border-radius: 10px; border:1px solid #ddd; background:#f6f6f6; cursor:pointer; }
+    button:disabled { opacity: 0.5; cursor:not-allowed; }
+
+    #quickBar { display:none; gap:10px; margin-top: 10px; }
+    .qr { flex:1; padding: 12px 14px; border-radius: 10px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    .qr.primary { background:#111; color:#fff; border-color:#111; }
+    .ctaRow { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
+    .ctaBtn { display:inline-block; padding:10px 12px; border-radius:10px; border:1px solid #111; text-decoration:none; color:#111; background:#fff; font-size:14px; }
+    .ctaBtn.primary { background:#111; color:#fff; }
   </style>
 </head>
 <body>
   <h2>Sitebuilder Chat</h2>
   <div id="chat"></div>
 
+  <div id="quickBar">
+    <button class="qr primary" id="btnYes" type="button">Yes</button>
+    <button class="qr" id="btnNo" type="button">No</button>
+  </div>
+
   <form id="form">
     <input id="input" placeholder="Type here..." autocomplete="off"/>
-    <button type="submit">Send</button>
+    <button type="submit" id="sendBtn">Send</button>
   </form>
+  <div id="turnstileMount" style="display:none;"></div>
 
   <script>
-    const WORKER_BASE = "https://sitebuilder-agent.96psxbzqk2.workers.dev";
+    const PRIMARY_WORKER_BASE = "https://api.cardetailingreno.com";
+    const FALLBACK_WORKER_BASE = "https://sitebuilder-agent.96psxbzqk2.workers.dev";
     let sessionId = null;
     let state = null;
 
     const chat = document.getElementById("chat");
     const input = document.getElementById("input");
     const form = document.getElementById("form");
+    const quickBar = document.getElementById("quickBar");
+    const btnYes = document.getElementById("btnYes");
+    const btnNo = document.getElementById("btnNo");
+    const sendBtn = document.getElementById("sendBtn");
+    let autoAdvanceTimer = null;
+    let pendingRequest = false;
+    let securityConfig = { turnstile_required: false, turnstile_site_key: null };
+    let turnstileScriptPromise = null;
+    let turnstileWidgetId = null;
+    let turnstileResolve = null;
+    let turnstileReject = null;
+
+    async function workerFetch(path, options = {}) {
+      const primaryUrl = `${PRIMARY_WORKER_BASE}${path}`;
+      let primaryResponse = null;
+      try {
+        primaryResponse = await fetch(primaryUrl, options);
+      } catch {}
+
+      const shouldFallback =
+        !primaryResponse ||
+        [520, 521, 522, 523, 525, 526, 530].includes(primaryResponse.status);
+
+      if (!shouldFallback) return primaryResponse;
+      return fetch(`${FALLBACK_WORKER_BASE}${path}`, options);
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function linkify(text) {
+      const safe = escapeHtml(text);
+      const urlRe = /(https?:\/\/[^\s)]+)|(\b([a-z0-9-]+\.)+[a-z]{2,}(\/[^\s)]*)?\b)/ig;
+      return safe.replace(urlRe, (m) => {
+        const href = m.startsWith("http") ? m : ("https://" + m);
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${m}</a>`;
+      });
+    }
 
     function addMsg(who, text) {
-      const div = document.createElement("div");
-      div.className = "msg " + who;
-      div.textContent = text;
-      chat.appendChild(div);
+      const row = document.createElement("div");
+      row.className = "msg " + who;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.innerHTML = linkify(text);
+
+      row.appendChild(bubble);
+      chat.appendChild(row);
       chat.scrollTop = chat.scrollHeight;
     }
+
+    function openSite(url) {
+      try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
+    }
+
+    function addDemoButton(demoUrl) {
+      const a = document.createElement("a");
+      a.href = demoUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Open Example Site (new tab)";
+      a.style.display = "inline-block";
+      a.style.marginTop = "8px";
+      a.style.padding = "10px 12px";
+      a.style.border = "1px solid #ddd";
+      a.style.borderRadius = "10px";
+      a.style.textDecoration = "none";
+      chat.appendChild(a);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function addColorSwatches(colors) {
+      const list = Array.isArray(colors) ? colors : [];
+      if (!list.length) return;
+
+      const row = document.createElement("div");
+      row.className = "msg ai";
+
+      const wrap = document.createElement("div");
+      wrap.className = "bubble";
+      wrap.style.display = "inline-flex";
+      wrap.style.gap = "8px";
+      wrap.style.alignItems = "center";
+
+      for (const c of list.slice(0, 6)) {
+        const sw = document.createElement("div");
+        sw.title = c;
+        sw.style.width = "22px";
+        sw.style.height = "22px";
+        sw.style.borderRadius = "6px";
+        sw.style.border = "1px solid #999";
+        sw.style.background = c;
+        wrap.appendChild(sw);
+      }
+
+      const txt = document.createElement("span");
+      txt.style.fontSize = "12px";
+      txt.textContent = list.slice(0, 6).join(", ");
+      wrap.appendChild(txt);
+
+      row.appendChild(wrap);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function addCtaActions(actions) {
+      const list = Array.isArray(actions) ? actions : [];
+      if (!list.length) return;
+      const row = document.createElement("div");
+      row.className = "ctaRow";
+
+      for (const action of list.slice(0, 3)) {
+        if (!action || !action.url) continue;
+        const a = document.createElement("a");
+        a.href = action.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.className = "ctaBtn" + (action.id === "connect_cloudflare" ? " primary" : "");
+        a.textContent = action.label || "Open";
+        row.appendChild(a);
+      }
+
+      if (!row.childElementCount) return;
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function shouldShowYesNoButtons(aiText) {
+      const t = String(aiText || "").toLowerCase();
+      const patterns = [
+        "is that correct",
+        "is that your website",
+        "want me to do that",
+        "want me to run the scan",
+        "would you be willing",
+        "would you like me to build",
+        "overall happy",
+      ];
+      if (patterns.some(p => t.includes(p))) return true;
+      if (t.includes("?") && (t.includes("would you") || t.includes("is that") || t.includes("want"))) return true;
+      return false;
+    }
+
+    function setYesNoUI(on) {
+      quickBar.style.display = on ? "flex" : "none";
+    }
+
+    function setRequestPending(isPending) {
+      pendingRequest = isPending;
+      input.disabled = isPending;
+      sendBtn.disabled = isPending;
+      btnYes.disabled = isPending;
+      btnNo.disabled = isPending;
+    }
+
+    async function loadSecurityConfig() {
+      try {
+        const r = await workerFetch("/security/config", { method: "GET" });
+        const data = await r.json();
+        if (r.ok && data && data.ok) {
+          securityConfig = {
+            turnstile_required: Boolean(data.turnstile_required),
+            turnstile_site_key: data.turnstile_site_key || null,
+          };
+        }
+      } catch {}
+      return securityConfig;
+    }
+
+    function loadTurnstileScript() {
+      if (window.turnstile) return Promise.resolve();
+      if (turnstileScriptPromise) return turnstileScriptPromise;
+      turnstileScriptPromise = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        s.async = true;
+        s.defer = true;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error("Could not load security challenge."));
+        document.head.appendChild(s);
+      });
+      return turnstileScriptPromise;
+    }
+
+    function handleTurnstileSuccess(token) {
+      if (turnstileResolve) turnstileResolve(String(token || ""));
+    }
+    function handleTurnstileError() {
+      if (turnstileReject) turnstileReject(new Error("Security challenge failed."));
+    }
+
+    async function ensureTurnstileToken() {
+      if (!securityConfig.turnstile_required) return null;
+      if (!securityConfig.turnstile_site_key) throw new Error("Security challenge is not configured.");
+      await loadTurnstileScript();
+      const mount = document.getElementById("turnstileMount");
+      if (!window.turnstile || !mount) throw new Error("Security challenge unavailable.");
+
+      if (turnstileWidgetId === null) {
+        turnstileWidgetId = window.turnstile.render(mount, {
+          sitekey: securityConfig.turnstile_site_key,
+          size: "invisible",
+          callback: handleTurnstileSuccess,
+          "error-callback": handleTurnstileError,
+          "expired-callback": handleTurnstileError,
+          action: "start",
+        });
+      }
+
+      return await new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (fn, value) => {
+          if (done) return;
+          done = true;
+          turnstileResolve = null;
+          turnstileReject = null;
+          clearTimeout(timeout);
+          fn(value);
+        };
+        const timeout = setTimeout(() => finish(reject, new Error("Security challenge timed out.")), 15000);
+        turnstileResolve = (token) => finish(resolve, token);
+        turnstileReject = (error) => finish(reject, error || new Error("Security challenge failed."));
+        try {
+          window.turnstile.reset(turnstileWidgetId);
+          window.turnstile.execute(turnstileWidgetId);
+        } catch (error) {
+          finish(reject, error);
+        }
+      });
+    }
+
+    async function callWorkerAnswer(text) {
+      if (pendingRequest) return;
+      setRequestPending(true);
+      try {
+        const r = await workerFetch("/q1/answer", {
+          method: "POST",
+          headers: {"content-type":"application/json"},
+          body: JSON.stringify({ session_id: sessionId, state, answer: text })
+        });
+
+        const data = await r.json();
+        if (!data.ok) {
+          if (data.code === "SECURITY_VERIFICATION_REQUIRED") {
+            addMsg("ai", "Security verification expired. Please refresh to restart securely.");
+          } else {
+            addMsg("ai", "Error: " + (data.error || "unknown"));
+          }
+          return;
+        }
+
+        state = data.next_state;
+
+        if (data.open_url) openSite(data.open_url);
+
+        addMsg("ai", data.prompt);
+
+        if (data.demo_url) {
+          addDemoButton(data.demo_url);
+        }
+
+        if (data.color_swatches) {
+          addColorSwatches(data.color_swatches);
+        }
+
+        if (data.cta_actions) {
+          addCtaActions(data.cta_actions);
+        }
+
+        setYesNoUI(shouldShowYesNoButtons(data.prompt));
+
+        if (autoAdvanceTimer) {
+          clearTimeout(autoAdvanceTimer);
+          autoAdvanceTimer = null;
+        }
+
+        if (data.auto_advance_after_seconds && data.auto_advance_answer) {
+          const secs = Number(data.auto_advance_after_seconds);
+          if (Number.isFinite(secs) && secs > 0) {
+            autoAdvanceTimer = setTimeout(async () => {
+              try {
+                if (pendingRequest) return;
+                await callWorkerAnswer(String(data.auto_advance_answer));
+              } catch {
+                addMsg("ai", "I could not auto-continue. Reply when you are ready.");
+              }
+            }, secs * 1000);
+          }
+        }
+      } finally {
+        setRequestPending(false);
+      }
+    }
+
+    btnYes.addEventListener("click", async () => {
+      if (pendingRequest) return;
+      addMsg("me", "yes");
+      try {
+        await callWorkerAnswer("yes");
+      } catch {
+        addMsg("ai", "Network/CORS error. Check DevTools console.");
+        setRequestPending(false);
+      }
+    });
+    btnNo.addEventListener("click", async () => {
+      if (pendingRequest) return;
+      addMsg("me", "no");
+      try {
+        await callWorkerAnswer("no");
+      } catch {
+        addMsg("ai", "Network/CORS error. Check DevTools console.");
+        setRequestPending(false);
+      }
+    });
 
     async function start() {
       const firstName = (prompt("First Name?") || "").trim();
@@ -47,28 +379,39 @@
 
       if (!firstName || !lastName) {
         addMsg("ai", "Please refresh and enter both First Name and Last Name to begin.");
+        input.disabled = true; sendBtn.disabled = true;
         return;
       }
 
+      await loadSecurityConfig();
+      let turnstileToken = null;
       try {
-        const r = await fetch(`${WORKER_BASE}/q1/start`, {
-          method: "POST",
-          headers: {"content-type":"application/json"},
-          body: JSON.stringify({ FirstName: firstName, LastName: lastName })
-        });
-
-        const data = await r.json();
-        if (!data.ok) {
-          addMsg("ai", "Start error: " + (data.error || "unknown"));
-          return;
-        }
-
-        sessionId = data.session_id;
-        state = data.next_state;
-        addMsg("ai", data.prompt);
-      } catch (e) {
-        addMsg("ai", "Network/CORS error starting session. Check DevTools console.");
+        turnstileToken = await ensureTurnstileToken();
+      } catch (error) {
+        addMsg("ai", "Security check failed. Please refresh and try again.");
+        input.disabled = true; sendBtn.disabled = true;
+        return;
       }
+
+      const r = await workerFetch("/q1/start", {
+        method: "POST",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({ FirstName: firstName, LastName: lastName, turnstile_token: turnstileToken })
+      });
+
+      const data = await r.json();
+      if (!data.ok) {
+        addMsg("ai", "Start error: " + (data.error || "unknown"));
+        input.disabled = true; sendBtn.disabled = true;
+        return;
+      }
+
+      sessionId = data.session_id;
+      state = data.next_state;
+
+      addMsg("ai", data.prompt);
+      setYesNoUI(shouldShowYesNoButtons(data.prompt));
+      input.focus();
     }
 
     form.addEventListener("submit", async (e) => {
@@ -85,22 +428,10 @@
       addMsg("me", text);
 
       try {
-        const r = await fetch(`${WORKER_BASE}/q1/answer`, {
-          method: "POST",
-          headers: {"content-type":"application/json"},
-          body: JSON.stringify({ session_id: sessionId, state, answer: text })
-        });
-
-        const data = await r.json();
-        if (!data.ok) {
-          addMsg("ai", "Error: " + (data.error || "unknown"));
-          return;
-        }
-
-        state = data.next_state;
-        addMsg("ai", data.prompt);
-      } catch (e) {
-        addMsg("ai", "Network/CORS error sending message. Check DevTools console.");
+        await callWorkerAnswer(text);
+      } catch {
+        addMsg("ai", "Network/CORS error. Check DevTools console.");
+        setRequestPending(false);
       }
     });
 
