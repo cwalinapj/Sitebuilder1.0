@@ -11,17 +11,5 @@ binding = "DB"
 database_name = "Onboarding_AI_Agent"
 database_id = "6829390f-6695-4f75-8ebb-d367150981ca"
 
-[[vectorize]]
-binding = "USER_MEM"
-index_name = "user-memory"
-
-[[vectorize]]
-binding = "GLOBAL_TRENDS"
-index_name = "global-trends"
-
-[[vectorize]]
-binding = "DESIGN_CATALOG"
-index_name = "design-catalog"
-
 [ai]
 binding = "AI"
