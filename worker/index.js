@@ -1,228 +1,193 @@
-import { EVENT_TYPES } from '../src/eventsEmitter.js';
-
-const EVENT_COUNTER_COLUMNS = {
-  [EVENT_TYPES.DEMO_LIKE]: 'likes',
-  [EVENT_TYPES.DEMO_DISLIKE]: 'dislikes',
-  [EVENT_TYPES.PALETTE_CHANGE]: 'palette_changes',
-  [EVENT_TYPES.FONT_CHANGE]: 'font_changes',
-  [EVENT_TYPES.LAYOUT_CHANGE]: 'layout_changes',
-  [EVENT_TYPES.TEMPLATE_CHOOSE]: 'templates_chosen',
-  [EVENT_TYPES.BUILD_PUBLISH]: 'builds_published',
-  [EVENT_TYPES.PORTFOLIO_FILTERABLE_VIEW]: 'portfolio_views'
-};
-const UNKNOWN_PREMIUM_SKU_ERROR = 'Unknown premium sku';
-
-async function storeSemanticMemory(db, { userId, type, payload, timestamp }) {
-  await db
-    .prepare(
-      'INSERT INTO semantic_memory (user_id, event_type, payload, occurred_at) VALUES (?1, ?2, ?3, ?4)'
-    )
-    .bind(userId, type, JSON.stringify(payload ?? {}), timestamp)
-    .run();
-}
-
-async function updateTasteProfile(db, { userId, type, timestamp }) {
-  const counterColumn = EVENT_COUNTER_COLUMNS[type];
-  if (!counterColumn) {
-    return;
-  }
-
-  const seedValues = Object.values(EVENT_COUNTER_COLUMNS).map((column) =>
-    column === counterColumn ? 1 : 0
-  );
-
-  await db
-    .prepare(
-      `INSERT INTO taste_profile (
-          user_id,
-          likes,
-          dislikes,
-          palette_changes,
-          font_changes,
-          layout_changes,
-          templates_chosen,
-          builds_published,
-          portfolio_views,
-          last_event_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-        ON CONFLICT(user_id) DO UPDATE SET
-          likes = taste_profile.likes + excluded.likes,
-          dislikes = taste_profile.dislikes + excluded.dislikes,
-          palette_changes = taste_profile.palette_changes + excluded.palette_changes,
-          font_changes = taste_profile.font_changes + excluded.font_changes,
-          layout_changes = taste_profile.layout_changes + excluded.layout_changes,
-          templates_chosen = taste_profile.templates_chosen + excluded.templates_chosen,
-          builds_published = taste_profile.builds_published + excluded.builds_published,
-          portfolio_views = taste_profile.portfolio_views + excluded.portfolio_views,
-          last_event_at = excluded.last_event_at`
-    )
-    .bind(userId, ...seedValues, timestamp)
-    .run();
-}
-
-async function getPremiumSku(db, sku) {
-  return db
-    .prepare(
-      'SELECT sku, price_cents, patron_reward_cents, patron_cap_cents FROM premium_skus WHERE sku = ?1'
-    )
-    .bind(sku)
-    .first();
-}
-
-async function getPatronRewardTotal(db, { patronUserId, sku }) {
-  const row = await db
-    .prepare(
-      "SELECT COALESCE(SUM(delta_cents), 0) AS total_rewarded FROM credits_ledger WHERE user_id = ?1 AND reason = 'patron_reward' AND ref_id = ?2"
-    )
-    .bind(patronUserId, sku)
-    .first();
-  return Number(row?.total_rewarded ?? 0);
-}
-
-async function createPremiumPurchase(db, { userId, sku, patronUserId, createdAt }) {
-  const premiumSku = await getPremiumSku(db, sku);
-  if (!premiumSku) {
-    throw new Error(UNKNOWN_PREMIUM_SKU_ERROR);
-  }
-
-  const purchaseId = crypto.randomUUID();
-  await db
-    .prepare(
-      'INSERT INTO purchases (purchase_id, user_id, sku, amount_usd_cents, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
-    )
-    .bind(purchaseId, userId, sku, premiumSku.price_cents, 'paid', createdAt)
-    .run();
-
-  let patronRewardCents = 0;
-  if (patronUserId) {
-    const totalRewarded = await getPatronRewardTotal(db, { patronUserId, sku });
-    const rewardRemaining = Math.max(0, premiumSku.patron_cap_cents - totalRewarded);
-    patronRewardCents = Math.min(premiumSku.patron_reward_cents, rewardRemaining);
-
-    if (patronRewardCents > 0) {
-      await db
-        .prepare(
-          'INSERT INTO credits_ledger (ledger_id, user_id, reason, delta_cents, ref_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
-        )
-        .bind(
-          crypto.randomUUID(),
-          patronUserId,
-          'patron_reward',
-          patronRewardCents,
-          sku,
-          createdAt
-        )
-        .run();
-    }
-  }
-
-  return {
-    purchaseId,
-    amountCents: premiumSku.price_cents,
-    patronRewardCents
-  };
-}
-
+// worker/index.js
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method !== 'POST') {
-      return new Response('Not found', { status: 404 });
+
+    // ---- helpers ----
+    const json = (obj, status = 200) =>
+      new Response(JSON.stringify(obj, null, 2), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+
+    const now = () => Date.now();
+    const newId = (prefix) => `${prefix}_${crypto.randomUUID()}`;
+
+    async function upsertSessionVars(session_id, block_id, independent, dependent) {
+      // Uses ON CONFLICT to update the row if it exists (SQLite syntax works in D1)
+      await env.DB.prepare(
+        `INSERT INTO session_vars(session_id, block_id, independent_json, dependent_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, block_id) DO UPDATE SET
+           independent_json=excluded.independent_json,
+           dependent_json=excluded.dependent_json,
+           updated_at=excluded.updated_at`
+      )
+        .bind(session_id, block_id, JSON.stringify(independent), JSON.stringify(dependent), now())
+        .run();
     }
 
-    if (url.pathname === '/purchase') {
-      const body = await request.json();
-      const userId = body.userId;
-      const sku = body.sku;
-      const patronUserId = body.patronUserId || null;
-      const createdAt = body.createdAt == null ? Date.now() : Number(body.createdAt);
+    async function loadSessionVars(session_id, block_id) {
+      const row = await env.DB.prepare(
+        "SELECT independent_json, dependent_json, updated_at FROM session_vars WHERE session_id=? AND block_id=?"
+      )
+        .bind(session_id, block_id)
+        .first();
 
-      if (!userId || !sku) {
-        return new Response(
-          JSON.stringify({ ok: false, error: 'Missing required fields: userId and sku' }),
-          {
-            status: 400,
-            headers: { 'content-type': 'application/json' }
-          }
-        );
-      }
-      if (!Number.isFinite(createdAt)) {
-        return new Response(JSON.stringify({ ok: false, error: 'Invalid createdAt' }), {
-          status: 400,
-          headers: { 'content-type': 'application/json' }
-        });
-      }
+      if (!row) return null;
+      return {
+        independent: JSON.parse(row.independent_json),
+        dependent: JSON.parse(row.dependent_json),
+        updated_at: row.updated_at,
+      };
+    }
 
+    function guessCategory(oneSentence) {
+      const s = (oneSentence || "").toLowerCase();
+
+      // Simple deterministic heuristic (replace later with your full logic tree)
+      if (/(restaurant|cafe|pizza|tacos|burger|bar|bistro|diner|sushi)/.test(s)) return "restaurant";
+      if (/(plumb|drain|water heater|pipe|leak|sewer)/.test(s)) return "plumber";
+      if (/(electric|breaker|panel|wiring|outlet|lighting)/.test(s)) return "electrician";
+      if (/(barber|haircut|fade|beard|shave|salon)/.test(s)) return "barber";
+      if (/(detail|detailing|ceramic|car wash|auto detailing)/.test(s)) return "auto detailing";
+      return "local business";
+    }
+
+    // ---- routes ----
+
+    // Health
+    if (request.method === "GET" && url.pathname === "/") {
+      return json({ ok: true, service: "Onboarding Q1 demo", time: new Date().toISOString() });
+    }
+
+    // POST /q1/start
+    // body: { "first_name": "Chris" }
+    if (request.method === "POST" && url.pathname === "/q1/start") {
+      let body;
       try {
-        const purchase = await createPremiumPurchase(env.DB, {
-          userId,
-          sku,
-          patronUserId,
-          createdAt
-        });
-        return new Response(JSON.stringify({ ok: true, ...purchase }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        });
-      } catch (error) {
-        const isUnknownSku = error.message === UNKNOWN_PREMIUM_SKU_ERROR;
-        const status = isUnknownSku ? 400 : 500;
-        const errorMessage = isUnknownSku ? UNKNOWN_PREMIUM_SKU_ERROR : 'Failed to create purchase';
-        const responseBody = { ok: false, error: errorMessage };
-        return new Response(
-          JSON.stringify(responseBody),
-          {
-            status,
-            headers: { 'content-type': 'application/json' }
-          }
-        );
+        body = await request.json();
+      } catch {
+        return json({ ok: false, error: "Invalid JSON" }, 400);
       }
-    }
 
-    if (url.pathname !== '/events') {
-      return new Response('Not found', { status: 404 });
-    }
+      const first_name = String(body?.first_name || "").trim();
+      if (!first_name) return json({ ok: false, error: "first_name required" }, 400);
 
-    const body = await request.json();
-    const event = {
-      userId: body.userId || 'anonymous',
-      type: body.type,
-      payload: body.payload || {},
-      timestamp: body.timestamp || new Date().toISOString()
-    };
+      const user_id = newId("usr");
+      const session_id = newId("ses");
 
-    if (!EVENT_COUNTER_COLUMNS[event.type]) {
-      return new Response(JSON.stringify({ ok: false, error: 'Invalid event type' }), {
-        status: 400,
-        headers: { 'content-type': 'application/json' }
+      // Insert user/session
+      await env.DB.prepare("INSERT INTO users(user_id, first_name, created_at) VALUES (?,?,?)")
+        .bind(user_id, first_name, now())
+        .run();
+
+      await env.DB.prepare("INSERT INTO sessions(session_id, user_id, created_at, last_seen_at, status) VALUES (?,?,?,?,?)")
+        .bind(session_id, user_id, now(), now(), "active")
+        .run();
+
+      // Initialize vars for q1 block
+      const independent_vars = {
+        user: { first_name },
+        session: { user_id, session_id },
+        q1: {
+          one_sentence: null,
+          category_guess: null,
+          category_confirmed_by_user: null,
+          declared_business_type_raw: null,
+          declared_business_type_definition_user: null,
+          reference_site_url: null,
+          business_name: null,
+          business_city_state: null,
+          business_website_user_provided: null,
+          verification_confirmed_by_user: null,
+        },
+      };
+
+      const dependent_vars = {
+        q1: {
+          business_type_final: null,
+          business_type_definition_final: null,
+          business_name_final: null,
+          verification: { candidate_url: null, summary: null, source: null },
+        },
+      };
+
+      await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+
+      return json({
+        ok: true,
+        user_id,
+        session_id,
+        next_state: "Q1A_ONE_SENTENCE",
+        prompt: `${first_name}, if you could describe your business in one sentence, what would that sentence be?`,
       });
     }
 
-    try {
-      await storeSemanticMemory(env.DB, event);
-      await updateTasteProfile(env.DB, event);
-    } catch (error) {
-      return new Response(
-        JSON.stringify({ ok: false, error: 'Failed to persist event', detail: error.message }),
-        {
-          status: 500,
-          headers: { 'content-type': 'application/json' }
-        }
-      );
+    // POST /q1/answer
+    // body: { session_id, state, answer }
+    if (request.method === "POST" && url.pathname === "/q1/answer") {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ ok: false, error: "Invalid JSON" }, 400);
+      }
+
+      const session_id = String(body?.session_id || "").trim();
+      const state = String(body?.state || "").trim();
+      const answer = body?.answer;
+
+      if (!session_id || !state) return json({ ok: false, error: "session_id and state required" }, 400);
+
+      // Load vars
+      const loaded = await loadSessionVars(session_id, "q1_business_identity");
+      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
+
+      const independent_vars = loaded.independent;
+      const dependent_vars = loaded.dependent;
+
+      // Touch session last_seen_at
+      await env.DB.prepare("UPDATE sessions SET last_seen_at=? WHERE session_id=?")
+        .bind(now(), session_id)
+        .run();
+
+      // Implement Q1A only (demo). We can extend to full Q1 tree next.
+      if (state === "Q1A_ONE_SENTENCE") {
+        const one_sentence = String(answer || "").trim();
+        if (!one_sentence) return json({ ok: false, error: "answer required" }, 400);
+
+        independent_vars.q1.one_sentence = one_sentence;
+        independent_vars.q1.category_guess = guessCategory(one_sentence);
+
+        // Save
+        await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+
+        return json({
+          ok: true,
+          next_state: "Q1B_CONFIRM_GUESSED_CATEGORY",
+          prompt: `Are you a ${independent_vars.q1.category_guess} business?`,
+          stored: {
+            one_sentence: independent_vars.q1.one_sentence,
+            category_guess: independent_vars.q1.category_guess,
+          },
+        });
+      }
+
+      return json({ ok: false, error: `State not implemented yet: ${state}` }, 400);
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
-  }
-};
+    // GET /q1/session?session_id=...
+    if (request.method === "GET" && url.pathname === "/q1/session") {
+      const session_id = url.searchParams.get("session_id") || "";
+      if (!session_id) return json({ ok: false, error: "session_id required" }, 400);
 
-export {
-  storeSemanticMemory,
-  updateTasteProfile,
-  EVENT_COUNTER_COLUMNS,
-  getPremiumSku,
-  getPatronRewardTotal,
-  createPremiumPurchase
+      const loaded = await loadSessionVars(session_id, "q1_business_identity");
+      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
+
+      return json({ ok: true, session_id, ...loaded });
+    }
+
+    return json({ ok: false, error: "Not Found" }, 404);
+  },
 };
