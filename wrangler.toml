@@ -3,7 +3,7 @@ main = "src/worker.ts"
 compatibility_date = "2026-02-24"
 
 [[r2_buckets]]
-binding = "seo-ai-apify-raw"
+binding = "seo_ai_apify_raw"
 bucket_name = "seo-ai-apify-raw"
 
 [[d1_databases]]
