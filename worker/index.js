@@ -59,9 +59,21 @@ export default {
       };
     }
 
-    // ===== simple deterministic business-type guess =====
+    // ===== name validation (no numbers) =====
+    function cleanHumanName(s) {
+      return String(s || "").trim().replace(/\s+/g, " ");
+    }
+    function isValidHumanName(s) {
+      // letters + spaces + hyphen + apostrophe only
+      return /^[A-Za-z][A-Za-z\s'-]{0,63}$/.test(String(s || "").trim());
+    }
+
+    // ===== deterministic business-type guess =====
     function guessBusinessType(desc) {
       const s = (desc || "").toLowerCase();
+
+      // scuba / dive
+      if (/(scuba|dive gear|diving|snorkel|dive shop|dive center)/.test(s)) return "dive shop";
 
       if (/(restaurant|cafe|pizza|tacos|burger|bar|bistro|diner|sushi|menu)/.test(s)) return "restaurant";
       if (/(plumb|drain|water heater|pipe|leak|sewer)/.test(s)) return "plumber";
@@ -72,7 +84,18 @@ export default {
       return "local business";
     }
 
-    // ===== OpenAI web_search: find top 3 candidates for (address + business_type) =====
+    function yesNo(answer) {
+      const yn = String(answer || "").trim().toLowerCase();
+      if (["yes", "y", "yeah", "yep", "sure", "ok"].includes(yn)) return true;
+      if (["no", "n", "nope", "nah", "stop"].includes(yn)) return false;
+      return null;
+    }
+
+    function isZip(s) {
+      return /^\d{5}(-\d{4})?$/.test(String(s || "").trim());
+    }
+
+    // ===== OpenAI web_search: top 3 candidates for (address + business_type) =====
     async function openaiSearchTop3(env, query) {
       if (!env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY secret");
 
@@ -86,15 +109,17 @@ export default {
               {
                 type: "text",
                 text:
-                  `Find the top 3 most likely businesses that match this query.\n` +
+                  `You are helping identify a business at a physical address.\n` +
+                  `Task: Find the best matches for what business is located at this address.\n` +
                   `Query: ${query}\n\n` +
-                  `Return STRICT JSON ONLY: an array of up to 3 objects with keys:\n` +
-                  `name, url, snippet, source_hint\n\n` +
+                  `Return STRICT JSON ONLY: an array of up to 3 objects:\n` +
+                  `[{"name":"","url":"","snippet":"","source_hint":""}]\n\n` +
                   `Rules:\n` +
-                  `- url must be a normal https URL\n` +
-                  `- source_hint should be the domain (e.g. yelp.com)\n` +
-                  `- snippet should be 1 short sentence\n` +
-                  `- Do not include any extra text outside JSON.`
+                  `- Prefer official sites or Google Business/Maps, then Yelp/Facebook/BBB.\n` +
+                  `- name must be the business name, not the category.\n` +
+                  `- url must be https.\n` +
+                  `- snippet should mention the address/city if possible.\n` +
+                  `- No extra text outside JSON.`
               }
             ]
           }
@@ -121,12 +146,15 @@ export default {
       try {
         const arr = JSON.parse(outText);
         if (!Array.isArray(arr)) return [];
-        return arr.slice(0, 3).map((x) => ({
-          name: String(x?.name || "").trim(),
-          url: String(x?.url || "").trim(),
-          snippet: String(x?.snippet || "").trim(),
-          source_hint: String(x?.source_hint || "").trim(),
-        })).filter((x) => x.name && x.url);
+        return arr
+          .slice(0, 3)
+          .map((x) => ({
+            name: String(x?.name || "").trim(),
+            url: String(x?.url || "").trim(),
+            snippet: String(x?.snippet || "").trim(),
+            source_hint: String(x?.source_hint || "").trim(),
+          }))
+          .filter((x) => x.name && x.url);
       } catch {
         return [];
       }
@@ -137,16 +165,17 @@ export default {
       const lines = [];
       for (let i = 0; i < list.length; i++) {
         const c = list[i];
-        const domain = c.source_hint || (() => {
-          try { return new URL(c.url).hostname; } catch { return ""; }
-        })();
+        let domain = c.source_hint;
+        if (!domain) {
+          try { domain = new URL(c.url).hostname; } catch { domain = ""; }
+        }
         const snip = c.snippet ? ` — ${c.snippet}` : "";
         lines.push(`${i + 1}) ${c.name}${domain ? ` (${domain})` : ""}${snip}`);
       }
       return lines.join("\n");
     }
 
-    function pickFromAnswer(ans, max) {
+    function pick123none(ans, max) {
       const a = String(ans || "").trim().toLowerCase();
       if (a === "none" || a === "no" || a === "n") return { kind: "none" };
       const m = a.match(/^\s*([1-9])\s*$/);
@@ -158,52 +187,43 @@ export default {
     }
 
     // ===== ROUTES =====
-
-    // Health
     if (request.method === "GET" && url.pathname === "/") {
-      return json({ ok: true, service: "Onboarding demo (Name + Q1 + Q2)", time: new Date().toISOString() });
+      return json({ ok: true, service: "Onboarding demo (Name + Q1 + Q2 + Q3/Q4)", time: new Date().toISOString() });
     }
 
-    // Debug: read stored vars
+    // Debug read
     if (request.method === "GET" && url.pathname === "/q1/session") {
       const session_id = (url.searchParams.get("session_id") || "").trim();
       if (!session_id) return json({ ok: false, error: "session_id required" }, 400);
-
       const loaded = await loadSessionVars(session_id, "onboarding_v1");
       if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
-
       return json({ ok: true, session_id, ...loaded });
     }
 
-    // START: requires First Name + Last Name (capital N)
-    // POST /q1/start { "FirstName": "...", "LastName": "..." }
+    // START: First Name + Last Name
+    // POST /q1/start { FirstName, LastName }
     if (request.method === "POST" && url.pathname === "/q1/start") {
       let body;
-      try { body = await request.json(); }
-      catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+      try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
 
-      // Accept both styles:
-      // - { FirstName, LastName } (preferred)
-      // - { first_name, last_name } (fallback)
-      const first_name = String(body?.FirstName || body?.first_name || "").trim();
-      const last_name  = String(body?.LastName  || body?.last_name  || "").trim();
+      const first_name = cleanHumanName(body?.FirstName || body?.first_name);
+      const last_name  = cleanHumanName(body?.LastName  || body?.last_name);
 
-      if (!first_name || !last_name) {
-        return json({ ok: false, error: "FirstName and LastName are required." }, 400);
+      if (!isValidHumanName(first_name) || !isValidHumanName(last_name)) {
+        return json({
+          ok: false,
+          error: "FirstName and LastName must use letters only (spaces, hyphens, apostrophes allowed)."
+        }, 400);
       }
 
       const user_id = newId("usr");
       const session_id = newId("ses");
 
-      // Keep DB schema compatible: users table has first_name only in your current DB.
-      // We'll store last_name in session_vars instead.
       await env.DB.prepare("INSERT INTO users(user_id, first_name, created_at) VALUES (?,?,?)")
         .bind(user_id, first_name, now())
         .run();
 
-      await env.DB.prepare(
-        "INSERT INTO sessions(session_id, user_id, created_at, last_seen_at, status) VALUES (?,?,?,?,?)"
-      )
+      await env.DB.prepare("INSERT INTO sessions(session_id, user_id, created_at, last_seen_at, status) VALUES (?,?,?,?,?)")
         .bind(session_id, user_id, now(), now(), "active")
         .run();
 
@@ -214,13 +234,13 @@ export default {
         business: {
           description_brief_raw: null,
           address_raw: null,
+          zip_raw: null,
           name_user_provided: null,
         },
 
-        // choices/answers
-        q: {
-          q1_done: false,
-          q2_done: false,
+        location: {
+          location_count: null,
+          service_model: null
         }
       };
 
@@ -229,11 +249,12 @@ export default {
           type_guess: null,
           name_final: null,
           website_candidate: null,
+          zip_final: null
         },
         lookup: {
           query: null,
           candidates_top3: [],
-          picked_index: null,
+          picked_index: null
         }
       };
 
@@ -244,16 +265,14 @@ export default {
         user_id,
         session_id,
         next_state: "Q1_DESCRIBE_BRIEFLY",
-        prompt: `hello ${first_name}, Could you please describe your business to me briefly?`,
+        prompt: `Hello ${first_name} ${last_name}, Could you please describe your business to me briefly?`
       });
     }
 
-    // ANSWER
-    // POST /q1/answer { session_id, state, answer }
+    // ANSWER: POST /q1/answer { session_id, state, answer }
     if (request.method === "POST" && url.pathname === "/q1/answer") {
       let body;
-      try { body = await request.json(); }
-      catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+      try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
 
       const session_id = String(body?.session_id || "").trim();
       const state = String(body?.state || "").trim();
@@ -271,7 +290,7 @@ export default {
         .bind(now(), session_id)
         .run();
 
-      // ---- Q1: describe briefly ----
+      // Q1
       if (state === "Q1_DESCRIBE_BRIEFLY") {
         const desc = String(answer || "").trim();
         if (!desc) return json({ ok: false, error: "Please describe your business briefly." }, 400);
@@ -279,56 +298,47 @@ export default {
         independent_vars.business.description_brief_raw = desc;
         dependent_vars.business.type_guess = guessBusinessType(desc);
 
-        independent_vars.q.q1_done = true;
-
         await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
-
-        const first_name = independent_vars.person.first_name;
-        const type_guess = dependent_vars.business.type_guess;
 
         return json({
           ok: true,
           next_state: "Q2_ADDRESS",
-          prompt: `Could you please tell me your address to your ${type_guess}?`,
+          prompt: `Could you please tell me your address to your ${dependent_vars.business.type_guess}?`
         });
       }
 
-      // ---- Q2: address ----
+      // Q2 address -> search -> pick -> else manual name -> then ZIP
       if (state === "Q2_ADDRESS") {
         const addr = String(answer || "").trim();
         if (!addr) return json({ ok: false, error: "Address is required." }, 400);
 
         independent_vars.business.address_raw = addr;
 
-        const type_guess = dependent_vars.business.type_guess || "business";
-        const query = `${addr} ${type_guess}`;
-        dependent_vars.lookup.query = query;
+        const q = `"${addr}" ${dependent_vars.business.type_guess || ""} business`;
+        dependent_vars.lookup.query = q;
 
         await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
-        // run search
         let candidates = [];
         try {
-          candidates = await openaiSearchTop3(env, query);
-        } catch (e) {
-          // if OpenAI search fails, fall back to manual name entry
+          candidates = await openaiSearchTop3(env, q);
+        } catch {
           await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
           return json({
             ok: true,
             next_state: "Q2_ASK_BUSINESS_NAME_MANUAL",
-            prompt: "I couldn't complete the web search. What is the name of your business?",
+            prompt: "I couldn't complete the web search. What is the name of your business?"
           });
         }
 
         dependent_vars.lookup.candidates_top3 = candidates;
-
         await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
         if (!candidates.length) {
           return json({
             ok: true,
             next_state: "Q2_ASK_BUSINESS_NAME_MANUAL",
-            prompt: "I couldn’t find reliable matches. What is the name of your business?",
+            prompt: "I couldn’t find reliable matches. What is the name of your business?"
           });
         }
 
@@ -338,48 +348,39 @@ export default {
           prompt:
             "Which one is your business?\n" +
             formatCandidates(candidates) +
-            "\n\nReply with 1, 2, 3, or none.",
+            "\n\nReply with 1, 2, 3, or none."
         });
       }
 
-      // ---- Q2: pick candidate ----
       if (state === "Q2_PICK_1_2_3_NONE") {
         const list = dependent_vars.lookup.candidates_top3 || [];
-        const choice = pickFromAnswer(answer, list.length);
+        const choice = pick123none(answer, list.length);
 
-        if (choice.kind === "invalid") {
-          return json({ ok: false, error: 'Reply with "1", "2", "3", or "none".' }, 400);
-        }
+        if (choice.kind === "invalid") return json({ ok: false, error: 'Reply with "1", "2", "3", or "none".' }, 400);
 
         if (choice.kind === "none") {
           await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
           return json({
             ok: true,
             next_state: "Q2_ASK_BUSINESS_NAME_MANUAL",
-            prompt: "What is the name of your business?",
+            prompt: "What is the name of your business?"
           });
         }
 
         const picked = list[choice.index];
         dependent_vars.lookup.picked_index = choice.index;
-
         dependent_vars.business.name_final = picked.name;
         dependent_vars.business.website_candidate = picked.url;
-
-        independent_vars.q.q2_done = true;
 
         await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
         return json({
           ok: true,
-          next_state: "ONBOARDING_PAUSE",
-          prompt:
-            `Thanks — I’ll treat your business name as "${picked.name}".\n` +
-            `Next: we can continue to locations, ZIP codes, and customer distribution.`,
+          next_state: "Q2_BUSINESS_ZIP",
+          prompt: "Could you give me the ZIP code of the business location?"
         });
       }
 
-      // ---- Q2 manual business name ----
       if (state === "Q2_ASK_BUSINESS_NAME_MANUAL") {
         const name = String(answer || "").trim();
         if (!name) return json({ ok: false, error: "Business name is required." }, 400);
@@ -387,25 +388,92 @@ export default {
         independent_vars.business.name_user_provided = name;
         dependent_vars.business.name_final = name;
 
-        independent_vars.q.q2_done = true;
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+
+        return json({
+          ok: true,
+          next_state: "Q2_BUSINESS_ZIP",
+          prompt: "Could you give me the ZIP code of the business location?"
+        });
+      }
+
+      if (state === "Q2_BUSINESS_ZIP") {
+        const zip = String(answer || "").trim();
+        if (!isZip(zip)) return json({ ok: false, error: "Please enter a valid ZIP code (e.g., 89502)." }, 400);
+
+        independent_vars.business.zip_raw = zip;
+        dependent_vars.business.zip_final = zip;
 
         await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
         return json({
           ok: true,
           next_state: "ONBOARDING_PAUSE",
-          prompt:
-            `Thanks — I’ll treat your business name as "${name}".\n` +
-            `Next: we can continue to locations, ZIP codes, and customer distribution.`,
+          prompt: "Next: would you like to continue to locations and customer ZIP distribution? (yes/no)"
         });
       }
 
-      // terminal-ish state so user can type without errors
+      // PAUSE -> branch
       if (state === "ONBOARDING_PAUSE") {
+        const yn = yesNo(answer);
+        if (yn === null) return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+
+        if (yn === false) {
+          return json({
+            ok: true,
+            next_state: "ONBOARDING_DONE",
+            prompt: "No problem. Onboarding is paused. Come back anytime to continue."
+          });
+        }
+
         return json({
           ok: true,
-          next_state: "ONBOARDING_PAUSE",
-          prompt: "Would you like to continue to locations and ZIP codes next? (yes/no)",
+          next_state: "Q3_LOCATION_COUNT",
+          prompt: "How many business locations do you have? (Just a number.)"
+        });
+      }
+
+      // Q3 number of locations
+      if (state === "Q3_LOCATION_COUNT") {
+        const n = Number(String(answer || "").trim());
+        if (!Number.isFinite(n) || n < 1 || n > 100) return json({ ok: false, error: "Please enter a number of locations (1–100)." }, 400);
+
+        independent_vars.location.location_count = n;
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+
+        return json({
+          ok: true,
+          next_state: "Q4_SERVICE_MODEL",
+          prompt: "Do customers mostly come to you, do you mostly go to them, or both? (come / go / both)"
+        });
+      }
+
+      // Q4 service model
+      if (state === "Q4_SERVICE_MODEL") {
+        const s = String(answer || "").trim().toLowerCase();
+        const mapped =
+          (s === "come" || s === "storefront") ? "storefront" :
+          (s === "go" || s === "service" || s === "service_area") ? "service_area" :
+          (s === "both") ? "both" : null;
+
+        if (!mapped) return json({ ok: false, error: 'Please reply: "come", "go", or "both".' }, 400);
+
+        independent_vars.location.service_model = mapped;
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+
+        return json({
+          ok: true,
+          next_state: "ONBOARDING_DONE",
+          prompt: "Great. Next we’ll do ranked customer ZIPs and % distribution (10/30/50/80+) and then start SERP runs."
+        });
+      }
+
+      // DONE
+      if (state === "ONBOARDING_DONE") {
+        return json({
+          ok: true,
+          next_state: "ONBOARDING_DONE",
+          prompt: "Onboarding is complete for now."
         });
       }
 
@@ -413,5 +481,5 @@ export default {
     }
 
     return json({ ok: false, error: "Not Found" }, 404);
-  },
+  }
 };
