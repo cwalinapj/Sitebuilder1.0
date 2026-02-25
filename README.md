@@ -22,12 +22,13 @@ python3 -m unittest discover -s src/tests -t . -p 'test_*.py'
 
 GitHub Actions workflow at `.github/workflows/pages.yml` builds `/site` and deploys to Cloudflare Pages when the required secrets are configured.
 
-## Cloudflare D1 setup
-
-Migrations live in `migrations/*.sql` and are applied with Wrangler:
+Before first deploy, create the Vectorize indexes (768 dimensions, cosine metric):
 
 ```bash
-npx wrangler d1 create sitebuilder
-# copy the printed database_id into wrangler.toml (database_id=...)
-npx wrangler d1 migrations apply sitebuilder
+npm run vectorize:create
 ```
+
+Worker API supports:
+- `POST /design-sample` to insert template or real-site `DesignSample` entries into the `DESIGN_CATALOG` Vectorize index.
+- `POST /event` to persist preference events in D1 and semantic memory in `USER_MEM`/`GLOBAL_TRENDS`.
+- `POST /recommend` to retrieve the next 2–3 diverse catalog candidates with drill-down questions and optional upsell metadata.
