@@ -39,11 +39,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build static site
-        run: python3 src/build.py
+     - name: Build static site
+  run: |
+    python3 src/build.py
+    test -f site/index.html
 
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+- name: Build previews
+  run: python3 src/build_preview.py
+
+- name: Deploy to Cloudflare Pages (Direct Upload)
+  uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

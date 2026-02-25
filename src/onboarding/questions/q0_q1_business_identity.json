@@ -1,0 +1,261 @@
+{
+  "id": "q0_q1_business_identity",
+  "version": 1,
+  "storage": {
+    "tables": {
+      "users": {
+        "primary_key": "user_id",
+        "fields": ["user_id", "first_name", "created_at"]
+      },
+      "sessions": {
+        "primary_key": "session_id",
+        "fields": ["session_id", "user_id", "created_at", "last_seen_at", "status"]
+      },
+      "session_vars": {
+        "primary_key": ["session_id", "block_id"],
+        "fields": ["session_id", "block_id", "independent_json", "dependent_json", "updated_at"]
+      }
+    },
+    "write_rules": [
+      {
+        "when": "on_each_state_transition",
+        "write": [
+          {
+            "table": "session_vars",
+            "block_id": "q0_q1_business_identity",
+            "independent_json_from": "independent_vars",
+            "dependent_json_from": "dependent_vars"
+          }
+        ]
+      }
+    ]
+  },
+  "independent_vars": {
+    "user": {
+      "first_name": null
+    },
+    "session": {
+      "user_id": null,
+      "session_id": null
+    },
+    "q1": {
+      "one_sentence": null,
+      "category_guess": null,
+      "category_confirmed_by_user": null,
+      "declared_business_type_raw": null,
+      "declared_business_type_definition_user": null,
+      "reference_site_url": null,
+      "business_name": null,
+      "business_city_state": null,
+      "business_website_user_provided": null,
+      "verification_confirmed_by_user": null
+    }
+  },
+  "dependent_vars": {
+    "q1": {
+      "business_type_final": null,
+      "business_type_definition_final": null,
+      "business_name_final": null,
+      "verification": {
+        "candidate_url": null,
+        "summary": null,
+        "source": null
+      }
+    }
+  },
+  "lookups": {
+    "ddg_instant_answer": {
+      "enabled": true,
+      "endpoint": "https://api.duckduckgo.com/",
+      "notes": "Instant Answer API provides summaries/related links when available; it is not a full SERP API."
+    },
+    "mediawiki_opensearch": {
+      "enabled": true,
+      "endpoint": "https://en.wikipedia.org/w/api.php",
+      "params": { "action": "opensearch", "format": "json" }
+    }
+  },
+  "states": [
+    {
+      "state": "Q0_FIRST_NAME",
+      "prompt": "Before we start, what’s your first name?",
+      "input": { "type": "text", "store_to": "independent_vars.user.first_name" },
+      "next": "Q0_CREATE_TOKENS"
+    },
+    {
+      "state": "Q0_CREATE_TOKENS",
+      "action": {
+        "type": "create_ids",
+        "assign": [
+          { "to": "independent_vars.session.user_id", "method": "uuid", "prefix": "usr" },
+          { "to": "independent_vars.session.session_id", "method": "uuid", "prefix": "ses" }
+        ],
+        "db_writes": [
+          {
+            "table": "users",
+            "values": {
+              "user_id": "{independent_vars.session.user_id}",
+              "first_name": "{independent_vars.user.first_name}",
+              "created_at": "{now_ms}"
+            }
+          },
+          {
+            "table": "sessions",
+            "values": {
+              "session_id": "{independent_vars.session.session_id}",
+              "user_id": "{independent_vars.session.user_id}",
+              "created_at": "{now_ms}",
+              "last_seen_at": "{now_ms}",
+              "status": "active"
+            }
+          }
+        ],
+        "notes": "Creates a user_id + session_id so all subsequent variables are attached to this user/session."
+      },
+      "next": "Q1A_ONE_SENTENCE"
+    },
+    {
+      "state": "Q1A_ONE_SENTENCE",
+      "prompt": "{independent_vars.user.first_name}, if you could describe your business in one sentence, what would that sentence be?",
+      "input": { "type": "text", "store_to": "independent_vars.q1.one_sentence" },
+      "next": "Q1B_CONFIRM_GUESSED_CATEGORY"
+    },
+    {
+      "state": "Q1B_CONFIRM_GUESSED_CATEGORY",
+      "action": {
+        "type": "derive",
+        "derive_to": "independent_vars.q1.category_guess",
+        "from": "independent_vars.q1.one_sentence",
+        "notes": "Derive a best-guess category label (restaurant/plumber/barber/agency/etc.)."
+      },
+      "prompt": "Are you a {independent_vars.q1.category_guess} business?",
+      "input": { "type": "yes_no", "store_to": "independent_vars.q1.category_confirmed_by_user" },
+      "branches": [
+        { "when": "yes", "next": "Q1C_BUSINESS_NAME" },
+        { "when": "no", "next": "Q1B_NO_ASK_TYPE" }
+      ]
+    },
+    {
+      "state": "Q1B_NO_ASK_TYPE",
+      "prompt": "Well what type of business is it then?",
+      "input": { "type": "text", "store_to": "independent_vars.q1.declared_business_type_raw" },
+      "next": "LOOKUP_TYPE_DEFINITION"
+    },
+    {
+      "state": "LOOKUP_TYPE_DEFINITION",
+      "action": {
+        "type": "lookup",
+        "lookups": [
+          {
+            "provider": "mediawiki_opensearch",
+            "query_template": "{independent_vars.q1.declared_business_type_raw}",
+            "result_map": {
+              "top_title": "dependent_vars.q1.business_type_final"
+            }
+          },
+          {
+            "provider": "ddg_instant_answer",
+            "query_template": "{independent_vars.q1.declared_business_type_raw}",
+            "result_map": {
+              "abstract": "dependent_vars.q1.business_type_definition_final",
+              "abstract_source": "dependent_vars.q1.verification.source"
+            }
+          }
+        ]
+      },
+      "next": "Q1B_NO_CONFIRM_TYPE_DEFINITION"
+    },
+    {
+      "state": "Q1B_NO_CONFIRM_TYPE_DEFINITION",
+      "prompt": "So your business does {dependent_vars.q1.business_type_definition_final} — is that accurate?",
+      "input": { "type": "yes_no", "store_to": "independent_vars.q1.category_confirmed_by_user" },
+      "branches": [
+        { "when": "yes", "next": "Q1C_BUSINESS_NAME" },
+        { "when": "no", "next": "Q1B_NO_ASK_USER_DEFINITION" }
+      ]
+    },
+    {
+      "state": "Q1B_NO_ASK_USER_DEFINITION",
+      "prompt": "Can you please tell me what {independent_vars.q1.declared_business_type_raw} does?",
+      "input": { "type": "text", "store_to": "independent_vars.q1.declared_business_type_definition_user" },
+      "next": "Q1B_NO_RECONCILE_USER_DEFINITION"
+    },
+    {
+      "state": "Q1B_NO_RECONCILE_USER_DEFINITION",
+      "action": {
+        "type": "derive",
+        "derive_to": "dependent_vars.q1.business_type_definition_final",
+        "from": "independent_vars.q1.declared_business_type_definition_user",
+        "notes": "Use the user's definition as canonical if lookups were inaccurate."
+      },
+      "prompt": "Based on what you said, I’m going to treat your business type as: {independent_vars.q1.declared_business_type_raw}. Is that correct?",
+      "input": { "type": "yes_no", "store_to": "independent_vars.q1.category_confirmed_by_user" },
+      "branches": [
+        { "when": "yes", "next": "Q1C_BUSINESS_NAME" },
+        { "when": "no", "next": "Q1B_NO_REFERENCE_SITE" }
+      ]
+    },
+    {
+      "state": "Q1B_NO_REFERENCE_SITE",
+      "prompt": "I’m not finding reliable information on that type. Can you share a website of another business that does the same thing, so I can match the category correctly?",
+      "input": { "type": "url_optional", "store_to": "independent_vars.q1.reference_site_url" },
+      "next": "Q1C_BUSINESS_NAME"
+    },
+    {
+      "state": "Q1C_BUSINESS_NAME",
+      "prompt": "What is the name of your business?",
+      "input": { "type": "text", "store_to": "independent_vars.q1.business_name" },
+      "next": "Q1D_VERIFY_BUSINESS_LOOKUP"
+    },
+    {
+      "state": "Q1D_VERIFY_BUSINESS_LOOKUP",
+      "action": {
+        "type": "lookup",
+        "lookups": [
+          {
+            "provider": "ddg_instant_answer",
+            "query_template": "{independent_vars.q1.business_name} {independent_vars.q1.business_city_state}",
+            "result_map": {
+              "abstract": "dependent_vars.q1.verification.summary",
+              "abstract_source": "dependent_vars.q1.verification.source",
+              "first_url": "dependent_vars.q1.verification.candidate_url"
+            }
+          }
+        ]
+      },
+      "prompt": "I found this for {independent_vars.q1.business_name}: Website: {dependent_vars.q1.verification.candidate_url} — Summary: {dependent_vars.q1.verification.summary}. Is this the right business?",
+      "input": { "type": "yes_no", "store_to": "independent_vars.q1.verification_confirmed_by_user" },
+      "branches": [
+        { "when": "yes", "next": "Q1_DONE" },
+        { "when": "no", "next": "Q1D_ASK_FOR_WEBSITE_OR_CITY" }
+      ]
+    },
+    {
+      "state": "Q1D_ASK_FOR_WEBSITE_OR_CITY",
+      "prompt": "Can you paste your website URL (if you have one), or tell me the city and state the business is in?",
+      "input": {
+        "type": "text_or_url",
+        "store_to": [
+          "independent_vars.q1.business_website_user_provided",
+          "independent_vars.q1.business_city_state"
+        ]
+      },
+      "next": "Q1_DONE"
+    },
+    {
+      "state": "Q1_DONE",
+      "action": {
+        "type": "finalize",
+        "assign": [
+          { "to": "dependent_vars.q1.business_name_final", "from": "independent_vars.q1.business_name" },
+          {
+            "to": "dependent_vars.q1.business_type_final",
+            "from_priority": ["independent_vars.q1.category_guess", "independent_vars.q1.declared_business_type_raw"]
+          }
+        ],
+        "notes": "Finalize confirmed business name/type for downstream onboarding and deterministic Apify runs."
+      },
+      "end": true
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sitebuilder Chat</title>
+  <style>
+    body { font-family: system-ui; max-width: 720px; margin: 24px auto; padding: 0 12px; }
+    #chat { border: 1px solid #ddd; border-radius: 10px; padding: 12px; height: 60vh; overflow:auto; }
+    .msg { margin: 10px 0; white-space: pre-wrap; }
+    .ai { color: #111; }
+    .me { color: #0b5; text-align: right; }
+    form { display:flex; gap:8px; margin-top: 10px; }
+    input { flex:1; padding: 10px; border-radius: 8px; border:1px solid #ddd; }
+    button { padding: 10px 14px; border-radius: 8px; border:1px solid #ddd; background:#f6f6f6; }
+  </style>
+</head>
+<body>
+  <h2>Sitebuilder Chat</h2>
+  <div id="chat"></div>
+
+  <form id="form">
+    <input id="input" placeholder="Type here..." autocomplete="off"/>
+    <button type="submit">Send</button>
+  </form>
+
+  <script>
+    const WORKER_BASE = "https://sitebuilder-agent.96psxbzqk2.workers.dev";
+    let sessionId = null;
+    let state = null;
+
+    const chat = document.getElementById("chat");
+    const input = document.getElementById("input");
+    const form = document.getElementById("form");
+
+    function addMsg(who, text) {
+      const div = document.createElement("div");
+      div.className = "msg " + who;
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    async function start() {
+      const firstName = (prompt("First Name?") || "").trim();
+      const lastName  = (prompt("Last Name?") || "").trim();
+
+      if (!firstName || !lastName) {
+        addMsg("ai", "Please refresh and enter both First Name and Last Name to begin.");
+        return;
+      }
+
+      try {
+        const r = await fetch(`${WORKER_BASE}/q1/start`, {
+          method: "POST",
+          headers: {"content-type":"application/json"},
+          body: JSON.stringify({ FirstName: firstName, LastName: lastName })
+        });
+
+        const data = await r.json();
+        if (!data.ok) {
+          addMsg("ai", "Start error: " + (data.error || "unknown"));
+          return;
+        }
+
+        sessionId = data.session_id;
+        state = data.next_state;
+        addMsg("ai", data.prompt);
+      } catch (e) {
+        addMsg("ai", "Network/CORS error starting session. Check DevTools console.");
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+
+      if (!sessionId || !state) {
+        addMsg("ai", "Session not started yet. Refresh the page to begin.");
+        return;
+      }
+
+      input.value = "";
+      addMsg("me", text);
+
+      try {
+        const r = await fetch(`${WORKER_BASE}/q1/answer`, {
+          method: "POST",
+          headers: {"content-type":"application/json"},
+          body: JSON.stringify({ session_id: sessionId, state, answer: text })
+        });
+
+        const data = await r.json();
+        if (!data.ok) {
+          addMsg("ai", "Error: " + (data.error || "unknown"));
+          return;
+        }
+
+        state = data.next_state;
+        addMsg("ai", data.prompt);
+      } catch (e) {
+        addMsg("ai", "Network/CORS error sending message. Check DevTools console.");
+      }
+    });
+
+    start();
+  </script>
+</body>
+</html>
