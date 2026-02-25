@@ -3,7 +3,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // --- CORS (supports Pages preview subdomains like fe9edabd.sitebuilder1-03.pages.dev) ---
+    // ===== CORS (supports Pages preview subdomains like fe9edabd.sitebuilder1-03.pages.dev) =====
     const origin = request.headers.get("Origin") || "";
     const allowed =
       origin === "https://sitebuilder1-03.pages.dev" ||
@@ -27,10 +27,10 @@ export default {
         headers: { "content-type": "application/json", ...corsHeaders },
       });
 
-    // ---- helpers ----
     const now = () => Date.now();
     const newId = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 
+    // ===== D1 helpers =====
     async function upsertSessionVars(session_id, block_id, independent, dependent) {
       await env.DB.prepare(
         `INSERT INTO session_vars(session_id, block_id, independent_json, dependent_json, updated_at)
@@ -59,40 +59,144 @@ export default {
       };
     }
 
-    function guessCategory(oneSentence) {
-      const s = (oneSentence || "").toLowerCase();
+    // ===== simple deterministic business-type guess =====
+    function guessBusinessType(desc) {
+      const s = (desc || "").toLowerCase();
 
-      if (/(restaurant|cafe|pizza|tacos|burger|bar|bistro|diner|sushi)/.test(s)) return "restaurant";
+      if (/(restaurant|cafe|pizza|tacos|burger|bar|bistro|diner|sushi|menu)/.test(s)) return "restaurant";
       if (/(plumb|drain|water heater|pipe|leak|sewer)/.test(s)) return "plumber";
       if (/(electric|breaker|panel|wiring|outlet|lighting)/.test(s)) return "electrician";
       if (/(barber|haircut|fade|beard|shave|salon)/.test(s)) return "barber";
-      if (/(detail|detailing|ceramic|car wash|auto detailing|clean cars)/.test(s)) return "auto detailing";
+      if (/(detail|detailing|ceramic|car wash|clean cars|wash cars)/.test(s)) return "auto detailing";
+      if (/(sell cars|selling cars|car dealer|dealership|used cars|new cars)/.test(s)) return "car dealership";
       return "local business";
     }
 
-    // ---- routes ----
+    // ===== OpenAI web_search: find top 3 candidates for (address + business_type) =====
+    async function openaiSearchTop3(env, query) {
+      if (!env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY secret");
+
+      const payload = {
+        model: "gpt-4.1-mini",
+        tools: [{ type: "web_search" }],
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  `Find the top 3 most likely businesses that match this query.\n` +
+                  `Query: ${query}\n\n` +
+                  `Return STRICT JSON ONLY: an array of up to 3 objects with keys:\n` +
+                  `name, url, snippet, source_hint\n\n` +
+                  `Rules:\n` +
+                  `- url must be a normal https URL\n` +
+                  `- source_hint should be the domain (e.g. yelp.com)\n` +
+                  `- snippet should be 1 short sentence\n` +
+                  `- Do not include any extra text outside JSON.`
+              }
+            ]
+          }
+        ]
+      };
+
+      const r = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(`OpenAI error ${r.status}: ${t.slice(0, 500)}`);
+      }
+
+      const data = await r.json();
+      const outText = (data.output_text || "").trim();
+
+      try {
+        const arr = JSON.parse(outText);
+        if (!Array.isArray(arr)) return [];
+        return arr.slice(0, 3).map((x) => ({
+          name: String(x?.name || "").trim(),
+          url: String(x?.url || "").trim(),
+          snippet: String(x?.snippet || "").trim(),
+          source_hint: String(x?.source_hint || "").trim(),
+        })).filter((x) => x.name && x.url);
+      } catch {
+        return [];
+      }
+    }
+
+    function formatCandidates(list) {
+      if (!Array.isArray(list) || list.length === 0) return "I couldn’t find reliable matches.";
+      const lines = [];
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        const domain = c.source_hint || (() => {
+          try { return new URL(c.url).hostname; } catch { return ""; }
+        })();
+        const snip = c.snippet ? ` — ${c.snippet}` : "";
+        lines.push(`${i + 1}) ${c.name}${domain ? ` (${domain})` : ""}${snip}`);
+      }
+      return lines.join("\n");
+    }
+
+    function pickFromAnswer(ans, max) {
+      const a = String(ans || "").trim().toLowerCase();
+      if (a === "none" || a === "no" || a === "n") return { kind: "none" };
+      const m = a.match(/^\s*([1-9])\s*$/);
+      if (m) {
+        const n = Number(m[1]);
+        if (n >= 1 && n <= max) return { kind: "pick", index: n - 1 };
+      }
+      return { kind: "invalid" };
+    }
+
+    // ===== ROUTES =====
 
     // Health
     if (request.method === "GET" && url.pathname === "/") {
-      return json({ ok: true, service: "Onboarding Q1 demo", time: new Date().toISOString() });
+      return json({ ok: true, service: "Onboarding demo (Name + Q1 + Q2)", time: new Date().toISOString() });
     }
 
-    // POST /q1/start
+    // Debug: read stored vars
+    if (request.method === "GET" && url.pathname === "/q1/session") {
+      const session_id = (url.searchParams.get("session_id") || "").trim();
+      if (!session_id) return json({ ok: false, error: "session_id required" }, 400);
+
+      const loaded = await loadSessionVars(session_id, "onboarding_v1");
+      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
+
+      return json({ ok: true, session_id, ...loaded });
+    }
+
+    // START: requires First Name + Last Name (capital N)
+    // POST /q1/start { "FirstName": "...", "LastName": "..." }
     if (request.method === "POST" && url.pathname === "/q1/start") {
       let body;
-      try {
-        body = await request.json();
-      } catch {
-        return json({ ok: false, error: "Invalid JSON" }, 400);
-      }
+      try { body = await request.json(); }
+      catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
 
-      // ✅ FIXED LINE
-      const first_name = String(body?.first_name || "").trim();
-      if (!first_name) return json({ ok: false, error: "first_name required" }, 400);
+      // Accept both styles:
+      // - { FirstName, LastName } (preferred)
+      // - { first_name, last_name } (fallback)
+      const first_name = String(body?.FirstName || body?.first_name || "").trim();
+      const last_name  = String(body?.LastName  || body?.last_name  || "").trim();
+
+      if (!first_name || !last_name) {
+        return json({ ok: false, error: "FirstName and LastName are required." }, 400);
+      }
 
       const user_id = newId("usr");
       const session_id = newId("ses");
 
+      // Keep DB schema compatible: users table has first_name only in your current DB.
+      // We'll store last_name in session_vars instead.
       await env.DB.prepare("INSERT INTO users(user_id, first_name, created_at) VALUES (?,?,?)")
         .bind(user_id, first_name, now())
         .run();
@@ -104,50 +208,52 @@ export default {
         .run();
 
       const independent_vars = {
-        user: { first_name },
+        person: { first_name, last_name },
         session: { user_id, session_id },
-        q1: {
-          one_sentence: null,
-          category_guess: null,
-          category_confirmed_by_user: null,
-          declared_business_type_raw: null,
-          declared_business_type_definition_user: null,
-          reference_site_url: null,
-          business_name: null,
-          business_city_state: null,
-          business_website_user_provided: null,
-          verification_confirmed_by_user: null,
+
+        business: {
+          description_brief_raw: null,
+          address_raw: null,
+          name_user_provided: null,
         },
+
+        // choices/answers
+        q: {
+          q1_done: false,
+          q2_done: false,
+        }
       };
 
       const dependent_vars = {
-        q1: {
-          business_type_final: null,
-          business_type_definition_final: null,
-          business_name_final: null,
-          verification: { candidate_url: null, summary: null, source: null },
+        business: {
+          type_guess: null,
+          name_final: null,
+          website_candidate: null,
         },
+        lookup: {
+          query: null,
+          candidates_top3: [],
+          picked_index: null,
+        }
       };
 
-      await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+      await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
       return json({
         ok: true,
         user_id,
         session_id,
-        next_state: "Q1A_ONE_SENTENCE",
-        prompt: `${first_name}, if you could describe your business in one sentence, what would that sentence be?`,
+        next_state: "Q1_DESCRIBE_BRIEFLY",
+        prompt: `hello ${first_name}, Could you please describe your business to me briefly?`,
       });
     }
 
-    // POST /q1/answer
+    // ANSWER
+    // POST /q1/answer { session_id, state, answer }
     if (request.method === "POST" && url.pathname === "/q1/answer") {
       let body;
-      try {
-        body = await request.json();
-      } catch {
-        return json({ ok: false, error: "Invalid JSON" }, 400);
-      }
+      try { body = await request.json(); }
+      catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
 
       const session_id = String(body?.session_id || "").trim();
       const state = String(body?.state || "").trim();
@@ -155,7 +261,7 @@ export default {
 
       if (!session_id || !state) return json({ ok: false, error: "session_id and state required" }, 400);
 
-      const loaded = await loadSessionVars(session_id, "q1_business_identity");
+      const loaded = await loadSessionVars(session_id, "onboarding_v1");
       if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
 
       const independent_vars = loaded.independent;
@@ -165,101 +271,145 @@ export default {
         .bind(now(), session_id)
         .run();
 
-      // --- Q1A ---
-      if (state === "Q1A_ONE_SENTENCE") {
-        const one_sentence = String(answer || "").trim();
-        if (!one_sentence) return json({ ok: false, error: "answer required" }, 400);
+      // ---- Q1: describe briefly ----
+      if (state === "Q1_DESCRIBE_BRIEFLY") {
+        const desc = String(answer || "").trim();
+        if (!desc) return json({ ok: false, error: "Please describe your business briefly." }, 400);
 
-        independent_vars.q1.one_sentence = one_sentence;
-        independent_vars.q1.category_guess = guessCategory(one_sentence);
+        independent_vars.business.description_brief_raw = desc;
+        dependent_vars.business.type_guess = guessBusinessType(desc);
 
-        await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+        independent_vars.q.q1_done = true;
+
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+
+        const first_name = independent_vars.person.first_name;
+        const type_guess = dependent_vars.business.type_guess;
 
         return json({
           ok: true,
-          next_state: "Q1B_CONFIRM_GUESSED_CATEGORY",
-          prompt: `Are you a ${independent_vars.q1.category_guess} business?`,
+          next_state: "Q2_ADDRESS",
+          prompt: `Could you please tell me your address to your ${type_guess}?`,
         });
       }
 
-      // --- Q1B yes/no ---
-      if (state === "Q1B_CONFIRM_GUESSED_CATEGORY") {
-        const yn = String(answer || "").trim().toLowerCase();
+      // ---- Q2: address ----
+      if (state === "Q2_ADDRESS") {
+        const addr = String(answer || "").trim();
+        if (!addr) return json({ ok: false, error: "Address is required." }, 400);
 
-        if (yn === "yes" || yn === "y") {
-          independent_vars.q1.category_confirmed_by_user = true;
-          dependent_vars.q1.business_type_final = independent_vars.q1.category_guess;
+        independent_vars.business.address_raw = addr;
 
-          await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+        const type_guess = dependent_vars.business.type_guess || "business";
+        const query = `${addr} ${type_guess}`;
+        dependent_vars.lookup.query = query;
 
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+
+        // run search
+        let candidates = [];
+        try {
+          candidates = await openaiSearchTop3(env, query);
+        } catch (e) {
+          // if OpenAI search fails, fall back to manual name entry
+          await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
           return json({
             ok: true,
-            next_state: "Q1C_BUSINESS_NAME",
+            next_state: "Q2_ASK_BUSINESS_NAME_MANUAL",
+            prompt: "I couldn't complete the web search. What is the name of your business?",
+          });
+        }
+
+        dependent_vars.lookup.candidates_top3 = candidates;
+
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+
+        if (!candidates.length) {
+          return json({
+            ok: true,
+            next_state: "Q2_ASK_BUSINESS_NAME_MANUAL",
+            prompt: "I couldn’t find reliable matches. What is the name of your business?",
+          });
+        }
+
+        return json({
+          ok: true,
+          next_state: "Q2_PICK_1_2_3_NONE",
+          prompt:
+            "Which one is your business?\n" +
+            formatCandidates(candidates) +
+            "\n\nReply with 1, 2, 3, or none.",
+        });
+      }
+
+      // ---- Q2: pick candidate ----
+      if (state === "Q2_PICK_1_2_3_NONE") {
+        const list = dependent_vars.lookup.candidates_top3 || [];
+        const choice = pickFromAnswer(answer, list.length);
+
+        if (choice.kind === "invalid") {
+          return json({ ok: false, error: 'Reply with "1", "2", "3", or "none".' }, 400);
+        }
+
+        if (choice.kind === "none") {
+          await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
+          return json({
+            ok: true,
+            next_state: "Q2_ASK_BUSINESS_NAME_MANUAL",
             prompt: "What is the name of your business?",
           });
         }
 
-        if (yn === "no" || yn === "n") {
-          independent_vars.q1.category_confirmed_by_user = false;
+        const picked = list[choice.index];
+        dependent_vars.lookup.picked_index = choice.index;
 
-          await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+        dependent_vars.business.name_final = picked.name;
+        dependent_vars.business.website_candidate = picked.url;
 
-          return json({
-            ok: true,
-            next_state: "Q1B_NO_ASK_TYPE",
-            prompt: "Well what type of business is it then?",
-          });
-        }
+        independent_vars.q.q2_done = true;
 
-        return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
-      }
-
-      // --- Q1B_NO ask type ---
-      if (state === "Q1B_NO_ASK_TYPE") {
-        const t = String(answer || "").trim();
-        if (!t) return json({ ok: false, error: "Please enter the business type." }, 400);
-
-        independent_vars.q1.declared_business_type_raw = t;
-        dependent_vars.q1.business_type_final = t;
-
-        await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
         return json({
           ok: true,
-          next_state: "Q1C_BUSINESS_NAME",
-          prompt: "What is the name of your business?",
+          next_state: "ONBOARDING_PAUSE",
+          prompt:
+            `Thanks — I’ll treat your business name as "${picked.name}".\n` +
+            `Next: we can continue to locations, ZIP codes, and customer distribution.`,
         });
       }
 
-      // --- Q1C business name ---
-      if (state === "Q1C_BUSINESS_NAME") {
+      // ---- Q2 manual business name ----
+      if (state === "Q2_ASK_BUSINESS_NAME_MANUAL") {
         const name = String(answer || "").trim();
         if (!name) return json({ ok: false, error: "Business name is required." }, 400);
 
-        independent_vars.q1.business_name = name;
-        dependent_vars.q1.business_name_final = name;
+        independent_vars.business.name_user_provided = name;
+        dependent_vars.business.name_final = name;
 
-        await upsertSessionVars(session_id, "q1_business_identity", independent_vars, dependent_vars);
+        independent_vars.q.q2_done = true;
+
+        await upsertSessionVars(session_id, "onboarding_v1", independent_vars, dependent_vars);
 
         return json({
           ok: true,
-          next_state: "Q1_DONE",
-          prompt: "Thanks. Question 1 is complete.",
+          next_state: "ONBOARDING_PAUSE",
+          prompt:
+            `Thanks — I’ll treat your business name as "${name}".\n` +
+            `Next: we can continue to locations, ZIP codes, and customer distribution.`,
+        });
+      }
+
+      // terminal-ish state so user can type without errors
+      if (state === "ONBOARDING_PAUSE") {
+        return json({
+          ok: true,
+          next_state: "ONBOARDING_PAUSE",
+          prompt: "Would you like to continue to locations and ZIP codes next? (yes/no)",
         });
       }
 
       return json({ ok: false, error: `State not implemented yet: ${state}` }, 400);
-    }
-
-    // GET /q1/session?session_id=...
-    if (request.method === "GET" && url.pathname === "/q1/session") {
-      const session_id = url.searchParams.get("session_id") || "";
-      if (!session_id) return json({ ok: false, error: "session_id required" }, 400);
-
-      const loaded = await loadSessionVars(session_id, "q1_business_identity");
-      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
-
-      return json({ ok: true, session_id, ...loaded });
     }
 
     return json({ ok: false, error: "Not Found" }, 404);
