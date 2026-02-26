@@ -385,6 +385,8 @@
     const billingActions = document.getElementById("billingActions");
     let autoAdvanceTimer = null;
     let pendingRequest = false;
+    let walletSession = null;
+    let onchainClaimShown = false;
     let securityConfig = {
       turnstile_required: false,
       turnstile_site_key: null,
@@ -769,6 +771,75 @@
       actionBar.style.display = "flex";
     }
 
+    function addInlineActionButton(label, onClick) {
+      const row = document.createElement("div");
+      row.className = "ctaRow";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ctaBtn primary";
+      btn.textContent = label;
+      btn.addEventListener("click", onClick);
+      row.appendChild(btn);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    async function startOnchainClaim() {
+      if (!sessionId || !walletSession || walletSession.protocol !== "solana") {
+        addMsg("ai", "On-chain claim is only available for Solana wallets right now.");
+        return;
+      }
+      try {
+        const prep = await workerFetch("/wallet/claim/prepare", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        const prepData = await prep.json();
+        if (!prep.ok || !prepData?.ok) {
+          addMsg("ai", prepData?.error || "Could not prepare on-chain claim.");
+          return;
+        }
+        if (prepData.already_claimed) {
+          addMsg("ai", "On-chain claim already recorded for this wallet.");
+          return;
+        }
+        const solanaWeb3 = await loadSolanaWeb3();
+        if (!solanaWeb3) throw new Error("Solana web3 not available.");
+        const provider = window.phantom?.solana || window.solana;
+        if (!provider || !provider.isPhantom) throw new Error("Phantom Solana wallet was not detected.");
+        const connection = new solanaWeb3.Connection(prepData.rpc_url, "confirmed");
+        const memoProgram = new solanaWeb3.PublicKey(prepData.memo_program);
+        const memoData = new TextEncoder().encode(String(prepData.memo || ""));
+        const memoIx = new solanaWeb3.TransactionInstruction({
+          keys: [],
+          programId: memoProgram,
+          data: memoData,
+        });
+        const tx = new solanaWeb3.Transaction().add(memoIx);
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+        tx.recentBlockhash = blockhash;
+        tx.feePayer = new solanaWeb3.PublicKey(walletSession.address);
+        const signed = await provider.signAndSendTransaction(tx, { preflightCommitment: "confirmed" });
+        const signature = String(signed?.signature || signed);
+        if (!signature) throw new Error("No signature returned from wallet.");
+        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+        const confirm = await workerFetch("/wallet/claim/confirm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, txid: signature }),
+        });
+        const confirmData = await confirm.json();
+        if (!confirm.ok || !confirmData?.ok) {
+          addMsg("ai", confirmData?.error || "Could not confirm on-chain claim.");
+          return;
+        }
+        addMsg("ai", `On-chain claim recorded. Tx: ${confirmData.txid}`);
+      } catch (error) {
+        addMsg("ai", String(error?.message || "On-chain claim failed."));
+      }
+    }
+
     function shouldShowYesNoButtons(aiText) {
       const t = String(aiText || "").toLowerCase();
       const patterns = [
@@ -1088,6 +1159,22 @@
       };
     }
 
+    let solanaWeb3ScriptPromise = null;
+    async function loadSolanaWeb3() {
+      if (window.solanaWeb3) return window.solanaWeb3;
+      if (!solanaWeb3ScriptPromise) {
+        solanaWeb3ScriptPromise = new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://unpkg.com/@solana/web3.js@1.95.4/lib/index.iife.min.js";
+          s.async = true;
+          s.onload = () => resolve(window.solanaWeb3);
+          s.onerror = () => reject(new Error("Failed to load Solana web3."));
+          document.head.appendChild(s);
+        });
+      }
+      return solanaWeb3ScriptPromise;
+    }
+
     async function startSession(payload) {
       await loadSecurityConfig();
       let turnstileToken = null;
@@ -1120,6 +1207,14 @@
         );
         if (data.billing.pricing_model) {
           addMsg("ai", formatPricingModel(data.billing.pricing_model));
+        }
+        if (walletSession?.protocol === "solana" && !data.billing.onchain_claimed && !onchainClaimShown) {
+          onchainClaimShown = true;
+          addMsg(
+            "ai",
+            "Optional: record a one-time on-chain claim (memo-only transaction) so your wallet is eligible for future rewards."
+          );
+          addInlineActionButton("Record On-chain Claim", startOnchainClaim);
         }
       }
       await loadBillingStatus();
@@ -1260,6 +1355,7 @@
         throw new Error("Unsupported wallet option.");
       }
 
+      walletSession = walletAuth;
       await startSession({ login_method: "wallet", wallet_auth: walletAuth });
     }
 

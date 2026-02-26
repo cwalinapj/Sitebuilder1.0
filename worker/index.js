@@ -1209,6 +1209,73 @@ export default {
       return raw || null;
     }
 
+    function resolveSolanaRpcUrl() {
+      const raw = String(env.SOLANA_RPC_URL || "").trim();
+      return raw || "https://api.mainnet-beta.solana.com";
+    }
+
+    function resolveSolanaNetworkLabel() {
+      const raw = String(env.SOLANA_NETWORK || "").trim();
+      return raw || "mainnet-beta";
+    }
+
+    async function solanaRpcCall(rpcUrl, method, params = []) {
+      const r = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok || !data || data.error) {
+        return { ok: false, error: data?.error?.message || `Solana RPC ${method} failed.` };
+      }
+      return { ok: true, result: data.result };
+    }
+
+    async function verifySolanaMemoTx(txid, expectedMemo, expectedWallet, rpcUrl) {
+      const memoProgramId = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+      const resp = await solanaRpcCall(rpcUrl, "getTransaction", [
+        txid,
+        {
+          encoding: "jsonParsed",
+          commitment: "confirmed",
+          maxSupportedTransactionVersion: 0,
+        },
+      ]);
+      if (!resp.ok) return resp;
+      const tx = resp.result;
+      if (!tx || tx.meta?.err) return { ok: false, error: "Transaction failed or not confirmed." };
+      const msg = tx.transaction?.message;
+      const keys = Array.isArray(msg?.accountKeys) ? msg.accountKeys : [];
+      const signerMatch = keys.find((k) => String(k?.pubkey || k || "") === expectedWallet);
+      if (!signerMatch || (signerMatch.signer === false)) {
+        return { ok: false, error: "Transaction signer does not match wallet." };
+      }
+      const instructions = Array.isArray(msg?.instructions) ? msg.instructions : [];
+      let memoFound = null;
+      for (const ix of instructions) {
+        const programId = String(ix?.programId || ix?.programIdIndex || ix?.program || "").trim();
+        const program = String(ix?.program || "").trim();
+        if (programId && programId !== memoProgramId && program !== "spl-memo") continue;
+        if (ix?.parsed?.memo) {
+          memoFound = String(ix.parsed.memo);
+          break;
+        }
+        if (ix?.data) {
+          const bytes = fromBase64ToBytes(String(ix.data)) || null;
+          if (bytes) {
+            memoFound = new TextDecoder().decode(bytes);
+            break;
+          }
+        }
+      }
+      if (!memoFound) return { ok: false, error: "Memo not found in transaction." };
+      if (String(memoFound) !== String(expectedMemo)) {
+        return { ok: false, error: "Memo mismatch." };
+      }
+      return { ok: true, memo: memoFound };
+    }
+
     function premiumBillingUsesGpu(backend) {
       return String(backend || "").toLowerCase() === "gpu";
     }
@@ -1331,6 +1398,11 @@ export default {
       billing.last_credit = billing.last_credit && typeof billing.last_credit === "object" ? billing.last_credit : null;
       billing.last_points_credit = billing.last_points_credit && typeof billing.last_points_credit === "object" ? billing.last_points_credit : null;
       billing.last_ad_reward_at = Number.isFinite(Number(billing.last_ad_reward_at)) ? Number(billing.last_ad_reward_at) : null;
+      billing.onchain_claim_txid = billing.onchain_claim_txid || null;
+      billing.onchain_claimed_at = billing.onchain_claimed_at || null;
+      billing.onchain_claim_memo = billing.onchain_claim_memo || null;
+      billing.onchain_claim_wallet = billing.onchain_claim_wallet || null;
+      billing.onchain_claim_pending = billing.onchain_claim_pending || null;
       billing.point_pack = billing.point_pack && typeof billing.point_pack === "object" ? billing.point_pack : {};
       billing.point_pack.price_usd = normalizedPointPackPriceUsd();
       billing.point_pack.points = normalizedPointPackAmount();
@@ -5925,6 +5997,8 @@ ul { margin: 0; padding-left: 18px; }
         llm_backend: resolvePremiumLlmBackend(),
         gpu_billing_enabled: premiumBillingUsesGpu(resolvePremiumLlmBackend()),
         gpu_endpoint: resolvePremiumGpuEndpoint(),
+        onchain_claimed: false,
+        onchain_claim_txid: null,
         pricing_model: {
           base_tokens: normalizedPremiumBaseCost(),
           per_page_tokens: normalizedPremiumPerPageCost(),
@@ -5972,6 +6046,8 @@ ul { margin: 0; padding-left: 18px; }
         llm_backend: billing.llm_backend || resolvePremiumLlmBackend(),
         gpu_billing_enabled: billing.gpu_billing_enabled === true,
         gpu_endpoint: billing.gpu_endpoint || resolvePremiumGpuEndpoint(),
+        onchain_claimed: Boolean(billing.onchain_claim_txid),
+        onchain_claim_txid: billing.onchain_claim_txid ? String(billing.onchain_claim_txid) : null,
         free_tokens: billing.free_tokens,
         free_points: billing.free_points,
           tokens_spent: billing.tokens_spent,
@@ -5993,6 +6069,101 @@ ul { margin: 0; padding-left: 18px; }
           last_quote: toPublicPremiumQuote(billing.last_quote, billing),
           pending_quote: toPublicPremiumQuote(billing.pending_quote, billing),
         },
+      });
+    }
+
+    if (request.method === "POST" && url.pathname === "/wallet/claim/prepare") {
+      if (!consumeEndpointRateLimit(clientIp, "wallet_claim_prepare", now(), 60 * 1000, 40)) {
+        return json({ ok: false, error: "Too many claim requests. Please slow down." }, 429);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ ok: false, error: "Invalid JSON" }, 400);
+      }
+      const session_id = String(body?.session_id || "").trim();
+      if (!session_id) return json({ ok: false, error: "session_id required." }, 400);
+      const loaded = await loadSessionVars(session_id, "onboarding_v8");
+      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
+      const independent = loaded.independent || {};
+      const dependent = loaded.dependent || {};
+      const billing = ensureBillingState(independent, dependent);
+      const wallet = independent?.person?.wallet || null;
+      if (!wallet || String(wallet.protocol || "") !== "solana") {
+        return json({ ok: false, error: "On-chain claim is only available for Solana wallets." }, 400);
+      }
+      if (billing.onchain_claim_txid) {
+        return json({
+          ok: true,
+          session_id,
+          already_claimed: true,
+          txid: billing.onchain_claim_txid,
+        });
+      }
+      const claimId = newId("clm");
+      const memo = `sitebuilder:claim:${session_id}:${wallet.address}:${claimId}`;
+      billing.onchain_claim_pending = {
+        claim_id: claimId,
+        memo,
+        wallet: wallet.address,
+        created_at: now(),
+      };
+      await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
+      return json({
+        ok: true,
+        session_id,
+        memo,
+        claim_id: claimId,
+        wallet: wallet.address,
+        rpc_url: resolveSolanaRpcUrl(),
+        network: resolveSolanaNetworkLabel(),
+        memo_program: "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+      });
+    }
+
+    if (request.method === "POST" && url.pathname === "/wallet/claim/confirm") {
+      if (!consumeEndpointRateLimit(clientIp, "wallet_claim_confirm", now(), 60 * 1000, 60)) {
+        return json({ ok: false, error: "Too many claim confirmations. Please slow down." }, 429);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ ok: false, error: "Invalid JSON" }, 400);
+      }
+      const session_id = String(body?.session_id || "").trim();
+      const txid = String(body?.txid || "").trim();
+      if (!session_id || !txid) return json({ ok: false, error: "session_id and txid are required." }, 400);
+      const loaded = await loadSessionVars(session_id, "onboarding_v8");
+      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
+      const independent = loaded.independent || {};
+      const dependent = loaded.dependent || {};
+      const billing = ensureBillingState(independent, dependent);
+      const wallet = independent?.person?.wallet || null;
+      if (!wallet || String(wallet.protocol || "") !== "solana") {
+        return json({ ok: false, error: "On-chain claim is only available for Solana wallets." }, 400);
+      }
+      const pending = billing.onchain_claim_pending || null;
+      if (!pending || !pending.memo) {
+        return json({ ok: false, error: "No pending claim found for this session." }, 400);
+      }
+      const rpcUrl = resolveSolanaRpcUrl();
+      const verified = await verifySolanaMemoTx(txid, pending.memo, wallet.address, rpcUrl);
+      if (!verified.ok) {
+        return json({ ok: false, error: verified.error || "Claim verification failed." }, 400);
+      }
+      billing.onchain_claim_txid = txid.slice(0, 180);
+      billing.onchain_claimed_at = now();
+      billing.onchain_claim_memo = pending.memo;
+      billing.onchain_claim_wallet = wallet.address;
+      billing.onchain_claim_pending = null;
+      await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
+      return json({
+        ok: true,
+        session_id,
+        txid: billing.onchain_claim_txid,
+        wallet: billing.onchain_claim_wallet,
       });
     }
 
