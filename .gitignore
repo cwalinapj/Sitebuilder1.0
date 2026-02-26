@@ -1,3 +1,7 @@
 **/__pycache__/
 *.py[cod]
 *.map
+node_modules/
+solana/**/target/
+.DS_Store
+.wrangler/
