@@ -258,6 +258,48 @@
       color: var(--muted);
       font-size: 13px;
     }
+    #billingPanel {
+      margin-top: 12px;
+      border: 1px solid #cdddf0;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #f7fbff;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+    }
+    .billingTitle {
+      font-size: 13px;
+      font-weight: 700;
+      color: #153350;
+      margin-bottom: 4px;
+    }
+    .billingLine {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+      line-height: 1.35;
+    }
+    .billingActions {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .billingBtn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid #2d4d71;
+      background: #fff;
+      color: #163454;
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .billingBtn.primary {
+      background: #173b62;
+      color: #fff;
+    }
     @media (max-width: 560px) {
       .startRow { grid-template-columns: 1fr 1fr; }
     }
@@ -291,6 +333,13 @@
       </button>
     </div>
     <div class="startHint" id="startHint">Wallet sign-in never asks you to copy/paste a public address.</div>
+    <div id="billingPanel" style="display:none;">
+      <div class="billingTitle">Starter tokens and pricing</div>
+      <div class="billingLine" id="billingStarter">Loading starter balance...</div>
+      <div class="billingLine" id="billingPricing"></div>
+      <div class="billingLine" id="billingBalance" style="display:none;"></div>
+      <div class="billingActions" id="billingActions" style="display:none;"></div>
+    </div>
   </div>
   <div id="chat"></div>
 
@@ -329,6 +378,11 @@
     const btnYes = document.getElementById("btnYes");
     const btnNo = document.getElementById("btnNo");
     const sendBtn = document.getElementById("sendBtn");
+    const billingPanel = document.getElementById("billingPanel");
+    const billingStarter = document.getElementById("billingStarter");
+    const billingPricing = document.getElementById("billingPricing");
+    const billingBalance = document.getElementById("billingBalance");
+    const billingActions = document.getElementById("billingActions");
     let autoAdvanceTimer = null;
     let pendingRequest = false;
     let securityConfig = {
@@ -357,6 +411,85 @@
 
       if (!shouldFallback) return primaryResponse;
       return fetch(`${FALLBACK_WORKER_BASE}${path}`, options);
+    }
+
+    function formatPricingModel(model) {
+      if (!model) return "";
+      const base = Number(model.base_tokens || 0);
+      const perPage = Number(model.per_page_tokens || 0);
+      const perWords = Number(model.per_30_words_tokens || 0);
+      const perComplex = Number(model.per_complexity_unit_tokens || 0);
+      return `Per request estimate: ${base} base tokens + ${perPage}/page + ${perWords} per 30 words + ${perComplex} per complexity unit.`;
+    }
+
+    function setBillingActions(urls = []) {
+      if (!billingActions) return;
+      billingActions.innerHTML = "";
+      const valid = urls.filter((u) => typeof u === "string" && u.trim());
+      if (!valid.length) {
+        billingActions.style.display = "none";
+        return;
+      }
+      billingActions.style.display = "flex";
+      valid.forEach((url, idx) => {
+        const a = document.createElement("a");
+        a.className = "billingBtn" + (idx === 0 ? " primary" : "");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = idx === 0 ? "Top up tokens" : "Buy points";
+        billingActions.appendChild(a);
+      });
+    }
+
+    function renderBillingConfig(cfg) {
+      if (!billingPanel || !billingStarter || !billingPricing) return;
+      const spl = String(cfg?.spl_symbol || "SPL");
+      const freeTokens = Number(cfg?.free_tokens || 0);
+      const freePoints = Number(cfg?.free_points || 0);
+      const pointsSymbol = String(cfg?.points_symbol || "PTS");
+      const pointsEnabled = cfg?.points_enabled === true;
+      const starterParts = [];
+      if (freeTokens > 0) starterParts.push(`Wallet sign-in gives you ${freeTokens} ${spl} starter tokens.`);
+      if (pointsEnabled && freePoints > 0) starterParts.push(`Name sign-in gets ${freePoints} ${pointsSymbol} starter points.`);
+      if (!starterParts.length) starterParts.push("Starter tokens are not enabled yet.");
+      billingStarter.textContent = starterParts.join(" ");
+      billingPricing.textContent = formatPricingModel(cfg?.pricing_model);
+      billingPanel.style.display = "block";
+      setBillingActions([cfg?.topup_url, cfg?.points_topup_url]);
+    }
+
+    function renderBillingStatus(status) {
+      if (!billingBalance) return;
+      const spl = String(status?.spl_symbol || "SPL");
+      const pointsSymbol = String(status?.points_symbol || "PTS");
+      const tokenBal = Number(status?.token_balance || 0);
+      const pointsBal = Number(status?.points_balance || 0);
+      const parts = [];
+      parts.push(`Current balance: ${tokenBal} ${spl} tokens.`);
+      if (status?.points_enabled) parts.push(`${pointsBal} ${pointsSymbol} points.`);
+      billingBalance.textContent = parts.join(" ");
+      billingBalance.style.display = "block";
+      setBillingActions([status?.topup_url, status?.points_topup_url]);
+    }
+
+    async function loadBillingConfig() {
+      try {
+        const r = await workerFetch("/billing/config", { method: "GET" });
+        const data = await r.json();
+        if (!r.ok || !data?.ok) return;
+        renderBillingConfig(data);
+      } catch {}
+    }
+
+    async function loadBillingStatus() {
+      if (!sessionId) return;
+      try {
+        const r = await workerFetch(`/billing/status?session_id=${encodeURIComponent(sessionId)}`, { method: "GET" });
+        const data = await r.json();
+        if (!r.ok || !data?.ok) return;
+        renderBillingStatus(data.billing || {});
+      } catch {}
     }
 
     function escapeHtml(s) {
@@ -962,6 +1095,19 @@
       input.disabled = false;
       sendBtn.disabled = false;
       addMsg("ai", data.prompt);
+      if (data.billing) {
+        renderBillingConfig(data.billing);
+        renderBillingStatus(data.billing);
+        addMsg(
+          "ai",
+          `Starter balance: ${Number(data.billing.token_balance || 0)} ${data.billing.spl_symbol || "SPL"} tokens` +
+            (data.billing.points_enabled ? ` and ${Number(data.billing.points_balance || 0)} ${data.billing.points_symbol || "PTS"} points.` : ".")
+        );
+        if (data.billing.pricing_model) {
+          addMsg("ai", formatPricingModel(data.billing.pricing_model));
+        }
+      }
+      await loadBillingStatus();
       setYesNoUI(shouldShowYesNoButtons(data.prompt));
       setSmartOptions(data.prompt, data);
       input.focus();
@@ -1155,6 +1301,8 @@
         walletLedgerBtn.title = "WalletConnect project id is not configured yet.";
       }
     });
+
+    loadBillingConfig();
   </script>
 </body>
 </html>

@@ -8981,7 +8981,28 @@ ul { margin: 0; padding-left: 18px; }
       await logEvent(env.DB, session_id, t, "assistant", "Q1_DESCRIBE", prompt);
       await flushSessionToR2(env.DB, session_id, session_created_at);
 
-      return json({ ok: true, user_id, session_id, next_state: "Q1_DESCRIBE", prompt });
+      const billingSnapshot = {
+        model: dependent?.billing?.model || "hybrid_spl_points_v1",
+        spl_symbol: dependent?.billing?.spl_symbol || premiumSplTokenSymbol(),
+        points_symbol: dependent?.billing?.points_symbol || premiumPointsSymbol(),
+        wallet_required: dependent?.billing?.wallet_required === true,
+        wallet_verified: dependent?.billing?.wallet_verified === true,
+        points_enabled: dependent?.billing?.points_enabled === true,
+        free_tokens: Number(dependent?.billing?.free_tokens || 0),
+        free_points: Number(dependent?.billing?.free_points || 0),
+        token_balance: Number(dependent?.billing?.token_balance || 0),
+        points_balance: Number(dependent?.billing?.points_balance || 0),
+        pricing_model: {
+          base_tokens: normalizedPremiumBaseCost(),
+          per_page_tokens: normalizedPremiumPerPageCost(),
+          per_30_words_tokens: normalizedPremiumPerWordCost(),
+          per_complexity_unit_tokens: normalizedPremiumComplexityCost(),
+        },
+        topup_url: dependent?.billing?.topup_url || premiumTopupUrl(),
+        points_topup_url: dependent?.billing?.points_topup_url || premiumPointsTopupUrl(),
+      };
+
+      return json({ ok: true, user_id, session_id, next_state: "Q1_DESCRIBE", prompt, billing: billingSnapshot });
     }
 
     // ANSWER
