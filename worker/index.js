@@ -90,6 +90,65 @@ export default {
     };
     const clientIp = clientIpFromRequest();
 
+    function isPluginPath(pathname) {
+      return pathname === "/plugin" || pathname.startsWith("/plugin/");
+    }
+
+    async function forwardPluginRequest() {
+      const pluginBindingAvailable = env.PLUGIN_API && typeof env.PLUGIN_API.fetch === "function";
+      const pluginApiBaseUrl = String(env.PLUGIN_API_BASE_URL || "").trim();
+
+      if (!pluginBindingAvailable && !pluginApiBaseUrl) {
+        return json(
+          {
+            ok: false,
+            error: "Plugin API forwarding is not configured on Sitebuilder.",
+            code: "PLUGIN_API_NOT_CONFIGURED",
+          },
+          503
+        );
+      }
+
+      const headers = new Headers(request.headers);
+      headers.set("x-sitebuilder-proxy", "sitebuilder-agent");
+      headers.set("x-sitebuilder-proxy-ts", String(now()));
+      if (!headers.get("x-forwarded-for") && clientIp !== "anon") {
+        headers.set("x-forwarded-for", clientIp);
+      }
+
+      const targetPath = `${url.pathname}${url.search}`;
+      let upstreamResponse;
+
+      if (pluginBindingAvailable) {
+        const upstreamRequest = new Request(`https://plugin.internal${targetPath}`, {
+          method: request.method,
+          headers,
+          body: request.body,
+          redirect: "manual",
+        });
+        upstreamResponse = await env.PLUGIN_API.fetch(upstreamRequest);
+      } else {
+        const upstreamUrl = new URL(targetPath, pluginApiBaseUrl).toString();
+        const upstreamRequest = new Request(upstreamUrl, {
+          method: request.method,
+          headers,
+          body: request.body,
+          redirect: "manual",
+        });
+        upstreamResponse = await fetch(upstreamRequest);
+      }
+
+      const mergedHeaders = new Headers(upstreamResponse.headers);
+      for (const [k, v] of Object.entries(corsHeaders)) {
+        mergedHeaders.set(k, v);
+      }
+
+      return new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        headers: mergedHeaders,
+      });
+    }
+
     const isTurnstileEnabled = () =>
       Boolean(String(env.TURNSTILE_SECRET_KEY || "").trim() && String(env.TURNSTILE_SITE_KEY || "").trim());
 
@@ -140,6 +199,10 @@ export default {
     function hasVerifiedSessionSecurity(dependent) {
       if (!isTurnstileEnabled()) return true;
       return Boolean(dependent?.security?.turnstile_verified);
+    }
+
+    if (isPluginPath(url.pathname)) {
+      return await forwardPluginRequest();
     }
 
     function ensureExpensiveActionAllowed(dependent) {

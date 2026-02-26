@@ -22,10 +22,16 @@ binding = "AI"
 binding = "INSPECTOR"
 service = "sitebuilder-inspector"
 
+[[services]]
+binding = "PLUGIN_API"
+service = "plugin-api"
+
 [vars]
 # Optional fallback if service binding is unavailable in your environment.
 # Example: INSPECTOR_BASE_URL = "https://sitebuilder-inspector.<account>.workers.dev"
 INSPECTOR_BASE_URL = "https://inspector.cardetailingreno.com"
+# Optional fallback if PLUGIN_API service binding is unavailable.
+PLUGIN_API_BASE_URL = ""
     # Optional public base URL for demo HTML stored in R2.
     # Example: DEMO_PUBLIC_BASE_URL = "https://demo-cdn.sitebuilder1-03.pages.dev"
     DEMO_PUBLIC_BASE_URL = ""
@@ -52,8 +58,6 @@ TURNSTILE_SITE_KEY = ""
 
 # Optional secret:
 # wrangler secret put OPENAI_API_KEY
-# Optional secret:
-# wrangler secret put WP_PLUGIN_SHARED_SECRET
 # Optional secret (for encrypting provider tokens in access vault):
 # wrangler secret put CREDENTIAL_VAULT_KEY
 # Optional secret:

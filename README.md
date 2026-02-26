@@ -65,13 +65,7 @@ The onboarding worker orchestrates chat state and triggers the inspector worker 
 - `GET /security/config` (Turnstile frontend config)
 - `GET /funnel/status?session_id=...` (conversion stage + CTA actions)
 - `POST /funnel/signal` (external/plugin signal ingestion)
-- `POST /plugin/connect/start` (start WordPress plugin + Cloudflare connect flow)
-- `POST /plugin/connect/verify` (verify TollDNS + Cloudflare API token and persist masked metadata)
-- `POST /plugin/wp/comments/moderate` (signed WordPress comment moderation decision endpoint)
-- `POST /plugin/wp/audit/sync` (signed WordPress telemetry sync for audit counts)
-- `POST /plugin/wp/access/profile` (signed WordPress access profile sync; stores usernames/public keys/scoped tokens, rejects plaintext passwords)
-- `POST /plugin/wp/schema/profile` (signed WordPress schema profile fetch for plugin JSON-LD injection)
-- `POST /plugin/wp/redirects/profile` (signed broken-link redirect profile for plugin 301 fallback rules)
+- `/plugin/*` routes are strictly proxied to the dedicated plugin API service (`PLUGIN_API` binding or `PLUGIN_API_BASE_URL` fallback).
 
 Contract freeze reference:
 
@@ -85,17 +79,18 @@ Contract freeze reference:
 
 ## Second Worker Wiring
 
-`wrangler.toml` includes a service binding:
+`wrangler.toml` includes service bindings:
 
 - `INSPECTOR` -> `sitebuilder-inspector`
+- `PLUGIN_API` -> dedicated plugin API worker
 
 If service bindings are unavailable in your environment, set:
 
 - `INSPECTOR_BASE_URL` to the inspector worker URL.
+- `PLUGIN_API_BASE_URL` to plugin API worker URL (used when service binding is unavailable).
 - `DEMO_PUBLIC_BASE_URL` to a public base URL that serves R2 demo HTML keys.
 - `DEMO_ASSET_CACHE_CONTROL` and `DEMO_HTML_CACHE_CONTROL` to tune cache behavior for demo static assets in R2.
 - `CORS_ALLOWED_ORIGINS` (comma-separated) for custom frontend domains, for example `https://app.cardetailingreno.com`.
-- `WP_PLUGIN_SHARED_SECRET` for HMAC verification from the WordPress plugin.
 
 ## New Flow (Localized References + Preference Memory)
 
