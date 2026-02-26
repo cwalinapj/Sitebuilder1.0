@@ -419,7 +419,7 @@
       const perPage = Number(model.per_page_tokens || 0);
       const perWords = Number(model.per_30_words_tokens || 0);
       const perComplex = Number(model.per_complexity_unit_tokens || 0);
-      return `Per request estimate: ${base} base tokens + ${perPage}/page + ${perWords} per 30 words + ${perComplex} per complexity unit.`;
+      return `Pricing is based on estimated token usage per request. Estimated formula: ${base} base + ${perPage}/page + ${perWords} per 30 words + ${perComplex} per complexity unit.`;
     }
 
     function setBillingActions(urls = []) {
@@ -489,6 +489,40 @@
         const data = await r.json();
         if (!r.ok || !data?.ok) return;
         renderBillingStatus(data.billing || {});
+      } catch {}
+    }
+
+    function shouldQuoteRequest(text) {
+      const t = String(text || "").trim().toLowerCase();
+      if (!t) return false;
+      if (t.length > 200) return true;
+      const hasBuild = /\b(build|create|generate|design|scaffold|produce|ship)\b/.test(t);
+      const hasSite = /\b(site|website|app|repo|repository|marketplace|portfolio|landing page)\b/.test(t);
+      return hasBuild && hasSite;
+    }
+
+    async function maybeShowQuote(text) {
+      if (!sessionId || !shouldQuoteRequest(text)) return;
+      try {
+        const r = await workerFetch("/billing/quote", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, request_text: text }),
+        });
+        const data = await r.json();
+        if (!r.ok || !data?.ok || !data?.quote) return;
+        const quote = data.quote;
+        const unit = quote.charge_symbol || data.quote_symbol || "tokens";
+        const amt = quote.charge_amount || data.quote_amount || 0;
+        const bal = quote.active_balance ?? data.active_balance ?? null;
+        const shortfall = quote.shortfall_amount ?? data.shortfall_amount ?? 0;
+        let line = `Estimated cost for this request: ${amt} ${unit}.`;
+        if (bal !== null) line += ` Current balance: ${bal} ${unit}.`;
+        if (shortfall > 0) line += ` Shortfall: ${shortfall} ${unit}.`;
+        addMsg("ai", line);
+        if (data.topup_url || data.points_topup_url) {
+          setBillingActions([data.topup_url, data.points_topup_url]);
+        }
       } catch {}
     }
 
@@ -1282,6 +1316,7 @@
       addMsg("me", text);
 
       try {
+        await maybeShowQuote(text);
         await callWorkerAnswer(text);
       } catch {
         addMsg("ai", "Network/CORS error. Check DevTools console.");
