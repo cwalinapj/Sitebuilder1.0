@@ -44,19 +44,30 @@ The onboarding worker orchestrates chat state and triggers the inspector worker 
 ### Onboarding Worker Endpoints
 
 - `POST /q1/start`
+- `GET /auth/wallet/challenge?provider=...&protocol=...` (wallet sign-in nonce/message)
 - `POST /q1/answer`
+- `GET /build/brief?session_id=...` (internal-only compiled build prompt for site engine)
+- `GET /billing/config` (premium hybrid model + pricing constants)
+- `GET /billing/status?session_id=...` (session premium token/point balance + quote status)
+- `POST /billing/quote` (estimate premium build cost in active charge unit)
+- `GET /billing/points/options?session_id=...` (point-pack + ad-reward availability)
+- `POST /billing/spl/credit` (SPL payment webhook crediting session tokens)
+- `POST /billing/points/credit` (app-points credit webhook for non-wallet sessions)
+- `POST /billing/points/ad/reward` (signed ad-completion reward credit)
 - `POST /q1/scan/start` (manual scan trigger)
 - `GET /q1/scan/status?session_id=...` (scan status/result bridge)
 - `GET /security/config` (Turnstile frontend config)
 - `GET /funnel/status?session_id=...` (conversion stage + CTA actions)
 - `POST /funnel/signal` (external/plugin signal ingestion)
 - `POST /plugin/connect/start` (start WordPress plugin + Cloudflare connect flow)
-- `POST /plugin/connect/verify` (verify TollDNS + Cloudflare API token and persist masked metadata)
+- `POST /plugin/connect/verify` (verify TollDNS + Cloudflare token + GitHub connection requirement and persist masked metadata)
 - `POST /plugin/wp/comments/moderate` (signed WordPress comment moderation decision endpoint)
 - `POST /plugin/wp/audit/sync` (signed WordPress telemetry sync for audit counts)
 - `POST /plugin/wp/access/profile` (signed WordPress access profile sync; stores usernames/public keys/scoped tokens, rejects plaintext passwords)
 - `POST /plugin/wp/schema/profile` (signed WordPress schema profile fetch for plugin JSON-LD injection)
 - `POST /plugin/wp/redirects/profile` (signed broken-link redirect profile for plugin 301 fallback rules)
+- `POST /plugin/wp/secrets/vault` (signed direct secret upload; encrypts and stores masked metadata in Worker vault state)
+- `POST /plugin/wp/sandbox/preflight` (signed non-persistent plugin-update sandbox preflight report)
 
 ### Inspector Worker Endpoints
 
@@ -77,6 +88,33 @@ If service bindings are unavailable in your environment, set:
 - `DEMO_ASSET_CACHE_CONTROL` and `DEMO_HTML_CACHE_CONTROL` to tune cache behavior for demo static assets in R2.
 - `CORS_ALLOWED_ORIGINS` (comma-separated) for custom frontend domains, for example `https://app.cardetailingreno.com`.
 - `WP_PLUGIN_SHARED_SECRET` for HMAC verification from the WordPress plugin.
+- `WALLETCONNECT_PROJECT_ID` to enable WalletConnect/Ledger wallet sign-in from the frontend UI.
+- `BUILD_BRIEF_DEBUG_KEY` to protect internal `/build/brief` access.
+- Premium metering:
+  - `PREMIUM_BUILDER_ENABLED`
+  - `PREMIUM_WALLET_REQUIRED`
+  - `PREMIUM_POINTS_ENABLED`
+  - `PREMIUM_SPL_SYMBOL`
+  - `PREMIUM_POINTS_SYMBOL`
+  - `PREMIUM_FREE_TOKENS`
+  - `PREMIUM_FREE_POINTS`
+  - `PREMIUM_TOKENS_PER_SPL`
+  - `PREMIUM_POINTS_PER_TOKEN`
+  - `PREMIUM_BASE_COST_TOKENS`
+  - `PREMIUM_PER_PAGE_COST_TOKENS`
+  - `PREMIUM_PER_30_WORD_COST_TOKENS`
+  - `PREMIUM_COMPLEXITY_UNIT_COST_TOKENS`
+  - `PREMIUM_TOPUP_URL`
+  - `PREMIUM_POINTS_TOPUP_URL`
+  - `PREMIUM_POINTS_PACK_PRICE_USD`
+  - `PREMIUM_POINTS_PACK_AMOUNT`
+  - `PREMIUM_POINTS_CHECKOUT_URL`
+  - `PREMIUM_AD_REWARDS_ENABLED`
+  - `PREMIUM_AD_REWARD_POINTS`
+  - `PREMIUM_AD_REWARD_COOLDOWN_SEC`
+  - `PREMIUM_SPL_WEBHOOK_SECRET` (optional HMAC verification for `/billing/spl/credit`)
+  - `PREMIUM_POINTS_WEBHOOK_SECRET` (optional HMAC verification for `/billing/points/credit`)
+  - `PREMIUM_AD_REWARD_WEBHOOK_SECRET` (optional HMAC verification for `/billing/points/ad/reward`)
 
 ## New Flow (Localized References + Preference Memory)
 
@@ -103,6 +141,31 @@ When the user agrees to view examples:
 - The user must explicitly confirm the selected type before it is saved.
 - Confirmed mappings from free-text description to canonical type are saved in D1 for future sessions.
 - The flow is server-state-locked to prevent question skipping via client-side state tampering.
+- New repo-seller intent path:
+  - Descriptions like "I develop web repos for sale" infer `developer repo marketplace`.
+  - Worker silently compiles a high-quality build brief prompt in `dependent.build_brief`.
+  - Internal systems can fetch that prompt through `/build/brief` for generation without extra user friction.
+
+## Premium Hybrid Billing (Implemented)
+
+- Standard chat flow (name-based) continues to work without premium generation.
+- Premium long-form build instructions are metered by estimated complexity and page count:
+  - 5-page builds cost more tokens than 1-page builds.
+- Wallet-authenticated users are charged in premium tokens (SPL top-up path).
+- Non-wallet users are charged in app points (points top-up path).
+- Public APIs expose only active-unit quotes (no public point/token conversion ratios).
+- Premium flow:
+  1. User submits advanced build instruction.
+  2. Worker creates a quote in the session's active unit (`tokens` or `points`) and moves to `Q_PREMIUM_CONFIRM`.
+  3. On `yes`, the active-unit balance is charged and premium mode is activated for the session.
+  4. If balance is insufficient, user is prompted to top up using the active unit path.
+
+- Free trial credits:
+  - New wallet-authenticated sessions receive `PREMIUM_FREE_TOKENS`.
+  - New non-wallet sessions receive `PREMIUM_FREE_POINTS` when points mode is enabled.
+- Monetization options:
+  - Point packs (default `$9.99`) via standard merchant checkout URL.
+  - Optional ad-reward points for users who watch verified ads.
 
 ## Database Migrations
 

@@ -5,40 +5,305 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Sitebuilder Chat</title>
   <style>
-    body { font-family: system-ui; max-width: 780px; margin: 24px auto; padding: 0 12px; }
-    #chat { border: 1px solid #ddd; border-radius: 12px; padding: 12px; height: 65vh; overflow:auto; background: #fff; }
+    :root {
+      --bg: #f5f8fb;
+      --panel-bg: #ffffff;
+      --panel-border: #dbe4ef;
+      --text: #162434;
+      --muted: #5e748d;
+      --accent: #1276d1;
+      --accent-ink: #ffffff;
+      --ai-bubble: #eef5fb;
+      --me-bubble: #e8f7ef;
+      --btn-bg: #f3f7fb;
+      --btn-border: #ccd9e8;
+    }
+    body {
+      font-family: system-ui;
+      max-width: 860px;
+      margin: 24px auto;
+      padding: 0 12px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, #ddeeff 0%, rgba(221,238,255,0) 35%),
+        radial-gradient(circle at bottom left, #dcf6e8 0%, rgba(220,246,232,0) 35%),
+        var(--bg);
+    }
+    #chat {
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 14px;
+      height: 65vh;
+      overflow: auto;
+      background: var(--panel-bg);
+      box-shadow: 0 12px 30px rgba(21, 44, 75, 0.08);
+    }
     .msg { margin: 10px 0; white-space: pre-wrap; line-height: 1.35; }
-    .ai { color: #111; }
-    .me { color: #0b5; text-align: right; }
-    .bubble { display:inline-block; padding: 10px 12px; border-radius: 12px; max-width: 92%; }
-    .ai .bubble { background: #f6f6f6; }
-    .me .bubble { background: #eafff2; }
-    a { color: inherit; text-decoration: underline; }
+    .ai { color: var(--text); }
+    .me { color: #0e6a3c; text-align: right; }
+    .bubble {
+      display: inline-block;
+      padding: 10px 12px;
+      border-radius: 12px;
+      max-width: 92%;
+      border: 1px solid var(--panel-border);
+    }
+    .ai .bubble { background: var(--ai-bubble); }
+    .me .bubble { background: var(--me-bubble); }
+    a { color: #0e5ea8; text-decoration: underline; }
     form { display:flex; gap:8px; margin-top: 10px; }
-    input { flex:1; padding: 12px; border-radius: 10px; border:1px solid #ddd; }
-    button { padding: 12px 14px; border-radius: 10px; border:1px solid #ddd; background:#f6f6f6; cursor:pointer; }
+    input { flex:1; padding: 12px; border-radius: 10px; border:1px solid var(--btn-border); }
+    button { padding: 12px 14px; border-radius: 10px; border:1px solid var(--btn-border); background: var(--btn-bg); cursor:pointer; }
     button:disabled { opacity: 0.5; cursor:not-allowed; }
 
     #quickBar { display:none; gap:10px; margin-top: 10px; }
-    .qr { flex:1; padding: 12px 14px; border-radius: 10px; border:1px solid #ddd; background:#fff; cursor:pointer; }
-    .qr.primary { background:#111; color:#fff; border-color:#111; }
+    .qr { flex:1; padding: 12px 14px; border-radius: 10px; border:1px solid var(--btn-border); background:#fff; cursor:pointer; }
+    .qr.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    #smartBar { display:none; gap:8px; margin-top: 8px; flex-wrap:wrap; }
+    .smartBtn { padding:9px 11px; border-radius: 999px; border:1px solid var(--btn-border); background:#fff; color: var(--text); cursor:pointer; font-size: 13px; }
+    .smartBtn:hover { border-color: #9cb4ce; }
+    #actionBar { display:none; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    .actionBtn { padding:10px 12px; border-radius:10px; border:1px solid #2d4d71; background:#fff; color:#163454; cursor:pointer; }
+    .actionBtn.primary { background:#173b62; color:#fff; }
     .ctaRow { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
-    .ctaBtn { display:inline-block; padding:10px 12px; border-radius:10px; border:1px solid #111; text-decoration:none; color:#111; background:#fff; font-size:14px; }
-    .ctaBtn.primary { background:#111; color:#fff; }
+    .ctaBtn { display:inline-block; padding:10px 12px; border-radius:10px; border:1px solid #2d4d71; text-decoration:none; color:#163454; background:#fff; font-size:14px; }
+    .ctaBtn.primary { background:#173b62; color:#fff; }
+    .paletteRow {
+      margin-top: 10px;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .paletteCard {
+      border: 1px solid #cfdeee;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #ffffff, #f7fbff);
+      padding: 11px;
+      box-shadow: 0 8px 22px rgba(20, 53, 86, 0.08);
+      transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+    }
+    .paletteCard:hover {
+      transform: translateY(-2px);
+      border-color: #9bb6d4;
+      box-shadow: 0 12px 26px rgba(20, 53, 86, 0.14);
+    }
+    .paletteMeta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .paletteTag {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #1d4f81;
+      border: 1px solid #b8cbe0;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #edf4fb;
+    }
+    .paletteTitle {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #173b62;
+      line-height: 1.2;
+    }
+    .paletteHint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      min-height: 30px;
+    }
+    .palettePreview {
+      width: 100%;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid #bdd0e5;
+      margin-bottom: 8px;
+      background: linear-gradient(90deg, #f1f5f9, #dbe8f4);
+    }
+    .paletteSwatches {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 9px;
+    }
+    .paletteSwatch {
+      border-radius: 9px;
+      overflow: hidden;
+      border: 1px solid #a3b7cc;
+      background: #fff;
+    }
+    .paletteDot {
+      width: 100%;
+      height: 30px;
+      border: 0;
+      border-radius: 0;
+    }
+    .paletteHex {
+      display: block;
+      font-size: 10px;
+      line-height: 1;
+      text-align: center;
+      padding: 5px 3px;
+      color: #304f70;
+      background: #fff;
+      letter-spacing: 0.02em;
+    }
+    .palettePickBtn {
+      width: 100%;
+      padding: 9px 10px;
+      border-radius: 10px;
+      border: 1px solid #9eb7d1;
+      background: linear-gradient(180deg, #fafdff, #edf4fb);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      color: #173b62;
+      transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
+    }
+    .palettePickBtn:hover {
+      border-color: #5f85ab;
+      box-shadow: 0 6px 14px rgba(28, 68, 110, 0.16);
+      transform: translateY(-1px);
+    }
+    .palettePickBtn:disabled {
+      opacity: 0.62;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    #startPanel {
+      border: 1px solid #cdddf0;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98));
+      padding: 14px;
+      margin-bottom: 10px;
+      box-shadow: 0 8px 24px rgba(24, 49, 80, 0.08);
+    }
+    .startTitle {
+      font-size: 15px;
+      font-weight: 700;
+      color: #153350;
+    }
+    .startSub {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .startRow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .startBtn {
+      padding: 10px 11px;
+      border-radius: 10px;
+      border: 1px solid var(--btn-border);
+      background: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-start;
+      text-align: left;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+    }
+    .startBtn:hover {
+      transform: translateY(-1px);
+      border-color: #8aabd0;
+      box-shadow: 0 8px 18px rgba(35, 70, 110, 0.12);
+    }
+    .startBtn.primary {
+      background: #173b62;
+      color: #fff;
+      border-color: #173b62;
+    }
+    .startIconWrap {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #eff5fb;
+      border: 1px solid #c8d9ec;
+      flex: 0 0 20px;
+    }
+    .startBtn.primary .startIconWrap {
+      background: rgba(255, 255, 255, 0.18);
+      border-color: rgba(255, 255, 255, 0.35);
+      color: #fff;
+    }
+    .startIcon {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      display: block;
+    }
+    .startLabel {
+      line-height: 1.1;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+    }
+    .startHint {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 560px) {
+      .startRow { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
   <h2>Sitebuilder Chat</h2>
+  <div id="startPanel">
+    <div class="startTitle">Choose how you want to sign in</div>
+    <div class="startSub">Wallet sign-in is one click. No copy/paste of wallet addresses.</div>
+    <div class="startRow">
+      <button class="startBtn primary" id="startNameBtn" type="button">
+        <span class="startIconWrap" aria-hidden="true">N</span>
+        <span class="startLabel">Use Name</span>
+      </button>
+      <button class="startBtn" id="walletMetaMaskBtn" type="button">
+        <span class="startIconWrap"><img class="startIcon" src="https://www.google.com/s2/favicons?sz=64&domain_url=metamask.io" alt="MetaMask icon"/></span>
+        <span class="startLabel">MetaMask</span>
+      </button>
+      <button class="startBtn" id="walletConnectBtn" type="button">
+        <span class="startIconWrap"><img class="startIcon" src="https://www.google.com/s2/favicons?sz=64&domain_url=walletconnect.com" alt="WalletConnect icon"/></span>
+        <span class="startLabel">WalletConnect</span>
+      </button>
+      <button class="startBtn" id="walletLedgerBtn" type="button">
+        <span class="startIconWrap"><img class="startIcon" src="https://www.google.com/s2/favicons?sz=64&domain_url=ledger.com" alt="Ledger icon"/></span>
+        <span class="startLabel">Ledger</span>
+      </button>
+      <button class="startBtn" id="walletPhantomBtn" type="button">
+        <span class="startIconWrap"><img class="startIcon" src="https://www.google.com/s2/favicons?sz=64&domain_url=phantom.app" alt="Phantom icon"/></span>
+        <span class="startLabel">Phantom</span>
+      </button>
+    </div>
+    <div class="startHint" id="startHint">Wallet sign-in never asks you to copy/paste a public address.</div>
+  </div>
   <div id="chat"></div>
 
   <div id="quickBar">
     <button class="qr primary" id="btnYes" type="button">Yes</button>
     <button class="qr" id="btnNo" type="button">No</button>
   </div>
+  <div id="smartBar"></div>
+  <div id="actionBar"></div>
 
   <form id="form">
-    <input id="input" placeholder="Type here..." autocomplete="off"/>
-    <button type="submit" id="sendBtn">Send</button>
+    <input id="input" placeholder="Type here..." autocomplete="off" disabled/>
+    <button type="submit" id="sendBtn" disabled>Send</button>
   </form>
   <div id="turnstileMount" style="display:none;"></div>
 
@@ -51,14 +316,30 @@
     const chat = document.getElementById("chat");
     const input = document.getElementById("input");
     const form = document.getElementById("form");
+    const startPanel = document.getElementById("startPanel");
+    const startHint = document.getElementById("startHint");
+    const startNameBtn = document.getElementById("startNameBtn");
+    const walletMetaMaskBtn = document.getElementById("walletMetaMaskBtn");
+    const walletConnectBtn = document.getElementById("walletConnectBtn");
+    const walletLedgerBtn = document.getElementById("walletLedgerBtn");
+    const walletPhantomBtn = document.getElementById("walletPhantomBtn");
     const quickBar = document.getElementById("quickBar");
+    const smartBar = document.getElementById("smartBar");
+    const actionBar = document.getElementById("actionBar");
     const btnYes = document.getElementById("btnYes");
     const btnNo = document.getElementById("btnNo");
     const sendBtn = document.getElementById("sendBtn");
     let autoAdvanceTimer = null;
     let pendingRequest = false;
-    let securityConfig = { turnstile_required: false, turnstile_site_key: null };
+    let securityConfig = {
+      turnstile_required: false,
+      turnstile_site_key: null,
+      wallet_login_enabled: true,
+      walletconnect_project_id: null,
+    };
     let turnstileScriptPromise = null;
+    let walletConnectScriptPromise = null;
+    let walletConnectProvider = null;
     let turnstileWidgetId = null;
     let turnstileResolve = null;
     let turnstileReject = null;
@@ -129,6 +410,25 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
+    function addOpenLinkButton(url, label = "Open Link (new tab)") {
+      const safe = String(url || "").trim();
+      if (!safe) return;
+      const a = document.createElement("a");
+      a.href = safe;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = label;
+      a.style.display = "inline-block";
+      a.style.marginTop = "8px";
+      a.style.padding = "10px 12px";
+      a.style.border = "1px solid var(--btn-border)";
+      a.style.borderRadius = "10px";
+      a.style.textDecoration = "none";
+      a.style.background = "#fff";
+      chat.appendChild(a);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
     function addColorSwatches(colors) {
       const list = Array.isArray(colors) ? colors : [];
       if (!list.length) return;
@@ -139,26 +439,125 @@
       const wrap = document.createElement("div");
       wrap.className = "bubble";
       wrap.style.display = "inline-flex";
-      wrap.style.gap = "8px";
+      wrap.style.gap = "10px";
       wrap.style.alignItems = "center";
+      wrap.style.flexWrap = "wrap";
+      wrap.style.maxWidth = "100%";
 
       for (const c of list.slice(0, 6)) {
+        const chip = document.createElement("div");
+        chip.style.display = "inline-flex";
+        chip.style.alignItems = "center";
+        chip.style.gap = "6px";
+        chip.style.padding = "4px 7px";
+        chip.style.border = "1px solid #c6d5e4";
+        chip.style.borderRadius = "999px";
+        chip.style.background = "#fff";
         const sw = document.createElement("div");
         sw.title = c;
-        sw.style.width = "22px";
-        sw.style.height = "22px";
-        sw.style.borderRadius = "6px";
-        sw.style.border = "1px solid #999";
+        sw.style.width = "18px";
+        sw.style.height = "18px";
+        sw.style.borderRadius = "5px";
+        sw.style.border = "1px solid #7f94aa";
         sw.style.background = c;
-        wrap.appendChild(sw);
+        const hex = document.createElement("span");
+        hex.style.fontSize = "12px";
+        hex.style.color = "var(--muted)";
+        hex.textContent = c;
+        chip.appendChild(sw);
+        chip.appendChild(hex);
+        wrap.appendChild(chip);
       }
 
-      const txt = document.createElement("span");
-      txt.style.fontSize = "12px";
-      txt.textContent = list.slice(0, 6).join(", ");
-      wrap.appendChild(txt);
-
       row.appendChild(wrap);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function addPaletteOptions(palettes) {
+      const list = Array.isArray(palettes) ? palettes : [];
+      if (!list.length) return;
+
+      const row = document.createElement("div");
+      row.className = "paletteRow";
+
+      for (const p of list.slice(0, 3)) {
+        const id = String(p?.id || "").trim().toUpperCase();
+        const name = String(p?.name || "").trim();
+        const desc = String(p?.description || "").trim();
+        const colors = Array.isArray(p?.colors) ? p.colors.slice(0, 5) : [];
+
+        const card = document.createElement("div");
+        card.className = "paletteCard";
+
+        const meta = document.createElement("div");
+        meta.className = "paletteMeta";
+        const tag = document.createElement("span");
+        tag.className = "paletteTag";
+        tag.textContent = id ? `Palette ${id}` : "Palette";
+        meta.appendChild(tag);
+        card.appendChild(meta);
+
+        const title = document.createElement("div");
+        title.className = "paletteTitle";
+        title.textContent = name || "Brand Direction";
+        card.appendChild(title);
+
+        if (desc) {
+          const hint = document.createElement("div");
+          hint.className = "paletteHint";
+          hint.textContent = desc;
+          card.appendChild(hint);
+        }
+
+        const preview = document.createElement("div");
+        preview.className = "palettePreview";
+        if (colors.length) {
+          preview.style.background = `linear-gradient(90deg, ${colors.join(", ")})`;
+        }
+        card.appendChild(preview);
+
+        const swatches = document.createElement("div");
+        swatches.className = "paletteSwatches";
+        for (const color of colors) {
+          const sw = document.createElement("div");
+          sw.className = "paletteSwatch";
+          const dot = document.createElement("div");
+          dot.className = "paletteDot";
+          dot.style.background = String(color || "#ddd");
+          dot.title = String(color || "");
+          const hex = document.createElement("span");
+          hex.className = "paletteHex";
+          hex.textContent = String(color || "").toUpperCase();
+          sw.appendChild(dot);
+          sw.appendChild(hex);
+          swatches.appendChild(sw);
+        }
+        card.appendChild(swatches);
+
+        const pickBtn = document.createElement("button");
+        pickBtn.type = "button";
+        pickBtn.className = "palettePickBtn";
+        pickBtn.textContent = `Choose ${id || "this palette"}`;
+        pickBtn.addEventListener("click", async () => {
+          if (pendingRequest) return;
+          for (const b of row.querySelectorAll(".palettePickBtn")) b.disabled = true;
+          const answer = id || "palette";
+          addMsg("me", answer);
+          try {
+            await callWorkerAnswer(answer);
+          } catch {
+            addMsg("ai", "Network/CORS error. Check DevTools console.");
+            setRequestPending(false);
+          } finally {
+            for (const b of row.querySelectorAll(".palettePickBtn")) b.disabled = false;
+          }
+        });
+        card.appendChild(pickBtn);
+        row.appendChild(card);
+      }
+
+      if (!row.childElementCount) return;
       chat.appendChild(row);
       chat.scrollTop = chat.scrollHeight;
     }
@@ -185,6 +584,43 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
+    function actionPriority(id) {
+      const order = {
+        install_ai_webadmin_plugin: 1,
+        connect_cloudflare: 2,
+        install_tolldns_required: 3,
+        signup_github_backup: 4,
+        migrate_hosting: 5,
+        free_vps_bridge: 6,
+        dual_server_upgrade: 7,
+        pay_monthly_paypal: 8,
+        pay_monthly_crypto: 9
+      };
+      return order[id] || 99;
+    }
+
+    function setActionBar(actions) {
+      const list = (Array.isArray(actions) ? actions : [])
+        .filter((a) => a && a.url)
+        .slice()
+        .sort((a, b) => actionPriority(a.id) - actionPriority(b.id))
+        .slice(0, 4);
+      actionBar.innerHTML = "";
+      if (!list.length) {
+        actionBar.style.display = "none";
+        return;
+      }
+      for (const a of list) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "actionBtn" + (a.id === "install_ai_webadmin_plugin" ? " primary" : "");
+        btn.textContent = a.label || "Open";
+        btn.addEventListener("click", () => openSite(a.url));
+        actionBar.appendChild(btn);
+      }
+      actionBar.style.display = "flex";
+    }
+
     function shouldShowYesNoButtons(aiText) {
       const t = String(aiText || "").toLowerCase();
       const patterns = [
@@ -205,12 +641,91 @@
       quickBar.style.display = on ? "flex" : "none";
     }
 
+    function setSmartOptions(aiText, payload = null) {
+      const t = String(aiText || "").toLowerCase();
+      const options = [];
+      const paletteOptions = Array.isArray(payload?.palette_options) ? payload.palette_options : [];
+
+      if (paletteOptions.length) {
+        for (const p of paletteOptions.slice(0, 3)) {
+          const id = String(p?.id || "").trim().toUpperCase();
+          const name = String(p?.name || "").trim();
+          if (!id) continue;
+          options.push({ label: `Palette ${id}${name ? ` (${name})` : ""}`, value: id });
+        }
+      }
+
+      if (t.includes('reply "opened"') || t.includes("when you're ready, open this link")) {
+        options.push({ label: "Opened", value: "opened" });
+        options.push({ label: "Different site", value: "different site" });
+      }
+      if (t.includes("(modern / bold)")) {
+        options.push({ label: "Modern", value: "modern" });
+        options.push({ label: "Bold", value: "bold" });
+        options.push({ label: "Not sure", value: "not sure" });
+      }
+      if (t.includes("too bright / too dark / just right")) {
+        options.push({ label: "Too bright", value: "too bright" });
+        options.push({ label: "Too dark", value: "too dark" });
+        options.push({ label: "Just right", value: "just right" });
+      }
+      if (t.includes("easy to read / cluttered / too empty")) {
+        options.push({ label: "Easy to read", value: "easy to read" });
+        options.push({ label: "Cluttered", value: "cluttered" });
+        options.push({ label: "Too empty", value: "too empty" });
+      }
+
+      const numberedMatches = [...String(aiText || "").matchAll(/\b([1-3])\)\s+([^\n]+)/g)];
+      if (numberedMatches.length >= 2) {
+        for (const m of numberedMatches.slice(0, 3)) {
+          options.push({ label: `${m[1]}) ${String(m[2]).trim().slice(0, 24)}`, value: m[1] });
+        }
+      }
+
+      const seen = new Set();
+      const deduped = options.filter((o) => {
+        const key = `${o.label}|${o.value}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 6);
+
+      smartBar.innerHTML = "";
+      if (!deduped.length) {
+        smartBar.style.display = "none";
+        return;
+      }
+
+      for (const opt of deduped) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "smartBtn";
+        b.textContent = opt.label;
+        b.addEventListener("click", async () => {
+          if (pendingRequest) return;
+          addMsg("me", opt.value);
+          try {
+            await callWorkerAnswer(opt.value);
+          } catch {
+            addMsg("ai", "Network/CORS error. Check DevTools console.");
+            setRequestPending(false);
+          }
+        });
+        smartBar.appendChild(b);
+      }
+      smartBar.style.display = "flex";
+    }
+
     function setRequestPending(isPending) {
       pendingRequest = isPending;
-      input.disabled = isPending;
-      sendBtn.disabled = isPending;
+      input.disabled = isPending || !sessionId;
+      sendBtn.disabled = isPending || !sessionId;
       btnYes.disabled = isPending;
       btnNo.disabled = isPending;
+      const smartButtons = smartBar.querySelectorAll("button");
+      for (const b of smartButtons) b.disabled = isPending;
+      const actionButtons = actionBar.querySelectorAll("button");
+      for (const b of actionButtons) b.disabled = isPending;
     }
 
     async function loadSecurityConfig() {
@@ -221,6 +736,8 @@
           securityConfig = {
             turnstile_required: Boolean(data.turnstile_required),
             turnstile_site_key: data.turnstile_site_key || null,
+            wallet_login_enabled: data.wallet_login_enabled !== false,
+            walletconnect_project_id: data.walletconnect_project_id || null,
           };
         }
       } catch {}
@@ -289,6 +806,167 @@
       });
     }
 
+    function setStartHint(text, isError = false) {
+      if (!startHint) return;
+      startHint.textContent = String(text || "");
+      startHint.style.color = isError ? "#9d1c1c" : "var(--muted)";
+    }
+
+    function setStartButtonsDisabled(disabled) {
+      const buttons = [startNameBtn, walletMetaMaskBtn, walletConnectBtn, walletLedgerBtn, walletPhantomBtn];
+      for (const b of buttons) {
+        if (b) b.disabled = Boolean(disabled);
+      }
+    }
+
+    function bytesToBase64(bytes) {
+      const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+      let s = "";
+      for (let i = 0; i < arr.length; i += 1) s += String.fromCharCode(arr[i]);
+      return btoa(s);
+    }
+
+    async function fetchWalletChallenge(provider, protocol) {
+      const q = new URLSearchParams({ provider: String(provider || ""), protocol: String(protocol || "evm") });
+      const r = await workerFetch(`/auth/wallet/challenge?${q.toString()}`, { method: "GET" });
+      const data = await r.json();
+      if (!r.ok || !data?.ok) {
+        throw new Error(String(data?.error || "Could not create wallet challenge."));
+      }
+      return data;
+    }
+
+    async function loadWalletConnectScript() {
+      if (window.WalletConnectEthereumProvider) return;
+      if (!walletConnectScriptPromise) {
+        walletConnectScriptPromise = new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://unpkg.com/@walletconnect/ethereum-provider@2.21.1/dist/index.umd.js";
+          s.async = true;
+          s.defer = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("Could not load WalletConnect."));
+          document.head.appendChild(s);
+        });
+      }
+      await walletConnectScriptPromise;
+    }
+
+    async function getWalletConnectProvider() {
+      const projectId = String(securityConfig.walletconnect_project_id || "").trim();
+      if (!projectId) throw new Error("WalletConnect is not configured yet.");
+      await loadWalletConnectScript();
+      if (!window.WalletConnectEthereumProvider?.init) throw new Error("WalletConnect provider unavailable.");
+      if (!walletConnectProvider) {
+        walletConnectProvider = await window.WalletConnectEthereumProvider.init({
+          projectId,
+          chains: [1],
+          optionalChains: [10, 56, 137, 8453, 42161, 43114],
+          showQrModal: true,
+          methods: ["personal_sign", "eth_sign", "eth_sendTransaction"],
+          optionalMethods: ["wallet_switchEthereumChain", "eth_chainId"],
+          optionalEvents: ["chainChanged", "accountsChanged"],
+        });
+      }
+      return walletConnectProvider;
+    }
+
+    async function signWithEvmProvider(provider, address, message) {
+      try {
+        return await provider.request({ method: "personal_sign", params: [message, address] });
+      } catch {
+        return await provider.request({ method: "eth_sign", params: [address, message] });
+      }
+    }
+
+    function pickMetaMaskProvider() {
+      const eth = window.ethereum;
+      if (!eth) return null;
+      if (Array.isArray(eth.providers) && eth.providers.length) {
+        return eth.providers.find((p) => p && p.isMetaMask) || eth.providers[0];
+      }
+      return eth;
+    }
+
+    async function connectEvmWallet(providerName) {
+      let provider = null;
+      if (providerName === "metamask") {
+        provider = pickMetaMaskProvider();
+        if (!provider) throw new Error("MetaMask was not detected.");
+      } else if (providerName === "phantom") {
+        provider = window.phantom?.ethereum || null;
+        if (!provider) throw new Error("Phantom EVM wallet was not detected.");
+      } else if (providerName === "walletconnect" || providerName === "ledger") {
+        provider = await getWalletConnectProvider();
+      } else {
+        throw new Error("Unsupported EVM wallet.");
+      }
+
+      const challenge = await fetchWalletChallenge(providerName, "evm");
+      const accounts = await provider.request({ method: "eth_requestAccounts" });
+      const address = Array.isArray(accounts) ? String(accounts[0] || "") : "";
+      if (!address) throw new Error("No wallet account was returned.");
+      const chainId = await provider.request({ method: "eth_chainId" });
+      const signature = await signWithEvmProvider(provider, address, challenge.message);
+      return {
+        provider: providerName,
+        protocol: "evm",
+        address,
+        chain_id: chainId,
+        nonce: challenge.nonce,
+        message: challenge.message,
+        signature,
+      };
+    }
+
+    async function connectPhantomSolana() {
+      const provider = window.phantom?.solana || window.solana;
+      if (!provider || !provider.isPhantom) throw new Error("Phantom Solana wallet was not detected.");
+      const challenge = await fetchWalletChallenge("phantom", "solana");
+      await provider.connect();
+      const encoded = new TextEncoder().encode(challenge.message);
+      const signed = await provider.signMessage(encoded, "utf8");
+      const address = String(signed?.publicKey?.toString?.() || provider?.publicKey?.toString?.() || "");
+      const signatureBytes = signed?.signature instanceof Uint8Array ? signed.signature : new Uint8Array(signed?.signature || []);
+      if (!address || !signatureBytes.length) throw new Error("Phantom did not return a valid signature.");
+      return {
+        provider: "phantom",
+        protocol: "solana",
+        address,
+        chain_id: "solana:mainnet-beta",
+        nonce: challenge.nonce,
+        message: challenge.message,
+        signature: bytesToBase64(signatureBytes),
+      };
+    }
+
+    async function startSession(payload) {
+      await loadSecurityConfig();
+      let turnstileToken = null;
+      try {
+        turnstileToken = await ensureTurnstileToken();
+      } catch {
+        throw new Error("Security check failed. Please refresh and try again.");
+      }
+
+      const r = await workerFetch("/q1/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...payload, turnstile_token: turnstileToken }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.ok) throw new Error(String(data?.error || "Could not start chat."));
+      sessionId = data.session_id;
+      state = data.next_state;
+      if (startPanel) startPanel.style.display = "none";
+      input.disabled = false;
+      sendBtn.disabled = false;
+      addMsg("ai", data.prompt);
+      setYesNoUI(shouldShowYesNoButtons(data.prompt));
+      setSmartOptions(data.prompt, data);
+      input.focus();
+    }
+
     async function callWorkerAnswer(text) {
       if (pendingRequest) return;
       setRequestPending(true);
@@ -311,7 +989,10 @@
 
         state = data.next_state;
 
-        if (data.open_url) openSite(data.open_url);
+        if (data.open_url) {
+          openSite(data.open_url);
+          addOpenLinkButton(data.open_url, "Open Suggested Link (new tab)");
+        }
 
         addMsg("ai", data.prompt);
 
@@ -323,11 +1004,25 @@
           addColorSwatches(data.color_swatches);
         }
 
-        if (data.cta_actions) {
+        if (Array.isArray(data.cta_actions) && data.cta_actions.length) {
           addCtaActions(data.cta_actions);
+          setActionBar(data.cta_actions);
+        } else if (Array.isArray(data.plugin_step_actions) && data.plugin_step_actions.length) {
+          const pluginActions = data.plugin_step_actions.map((s) => ({
+            id: s.id,
+            url: s.url,
+            label: `${s.step}) ${s.label}`
+          }));
+          addCtaActions(pluginActions);
+          setActionBar(pluginActions);
         }
 
         setYesNoUI(shouldShowYesNoButtons(data.prompt));
+        setSmartOptions(data.prompt, data);
+
+        if (Array.isArray(data.palette_options) && data.palette_options.length) {
+          addPaletteOptions(data.palette_options);
+        }
 
         if (autoAdvanceTimer) {
           clearTimeout(autoAdvanceTimer);
@@ -373,45 +1068,58 @@
       }
     });
 
-    async function start() {
+    async function startWithName() {
       const firstName = (prompt("First Name?") || "").trim();
-      const lastName  = (prompt("Last Name?") || "").trim();
-
+      const lastName = (prompt("Last Name?") || "").trim();
       if (!firstName || !lastName) {
-        addMsg("ai", "Please refresh and enter both First Name and Last Name to begin.");
-        input.disabled = true; sendBtn.disabled = true;
+        setStartHint("Please enter both first and last name to continue.", true);
         return;
       }
+      await startSession({ FirstName: firstName, LastName: lastName, login_method: "name" });
+    }
 
-      await loadSecurityConfig();
-      let turnstileToken = null;
+    async function startWithWallet(providerName) {
+      const provider = String(providerName || "").toLowerCase();
+      if (!provider) return;
+
+      let walletAuth = null;
+      if (provider === "metamask") {
+        walletAuth = await connectEvmWallet("metamask");
+      } else if (provider === "walletconnect") {
+        walletAuth = await connectEvmWallet("walletconnect");
+      } else if (provider === "ledger") {
+        walletAuth = await connectEvmWallet("ledger");
+      } else if (provider === "phantom") {
+        if (window.phantom?.solana || window.solana?.isPhantom) {
+          walletAuth = await connectPhantomSolana();
+        } else {
+          walletAuth = await connectEvmWallet("phantom");
+        }
+      } else {
+        throw new Error("Unsupported wallet option.");
+      }
+
+      await startSession({ login_method: "wallet", wallet_auth: walletAuth });
+    }
+
+    async function handleStartAction(action) {
+      if (pendingRequest) return;
+      setRequestPending(true);
+      setStartButtonsDisabled(true);
+      setStartHint("Connecting…");
       try {
-        turnstileToken = await ensureTurnstileToken();
+        if (action === "name") {
+          await startWithName();
+        } else {
+          await startWithWallet(action);
+        }
+        setStartHint("Connected.");
       } catch (error) {
-        addMsg("ai", "Security check failed. Please refresh and try again.");
-        input.disabled = true; sendBtn.disabled = true;
-        return;
+        setStartHint(String(error?.message || "Start failed. Please try again."), true);
+      } finally {
+        setRequestPending(false);
+        if (!sessionId) setStartButtonsDisabled(false);
       }
-
-      const r = await workerFetch("/q1/start", {
-        method: "POST",
-        headers: {"content-type":"application/json"},
-        body: JSON.stringify({ FirstName: firstName, LastName: lastName, turnstile_token: turnstileToken })
-      });
-
-      const data = await r.json();
-      if (!data.ok) {
-        addMsg("ai", "Start error: " + (data.error || "unknown"));
-        input.disabled = true; sendBtn.disabled = true;
-        return;
-      }
-
-      sessionId = data.session_id;
-      state = data.next_state;
-
-      addMsg("ai", data.prompt);
-      setYesNoUI(shouldShowYesNoButtons(data.prompt));
-      input.focus();
     }
 
     form.addEventListener("submit", async (e) => {
@@ -435,7 +1143,18 @@
       }
     });
 
-    start();
+    startNameBtn.addEventListener("click", () => handleStartAction("name"));
+    walletMetaMaskBtn.addEventListener("click", () => handleStartAction("metamask"));
+    walletConnectBtn.addEventListener("click", () => handleStartAction("walletconnect"));
+    walletLedgerBtn.addEventListener("click", () => handleStartAction("ledger"));
+    walletPhantomBtn.addEventListener("click", () => handleStartAction("phantom"));
+
+    loadSecurityConfig().then((cfg) => {
+      if (!cfg.walletconnect_project_id) {
+        walletConnectBtn.title = "WalletConnect project id is not configured yet.";
+        walletLedgerBtn.title = "WalletConnect project id is not configured yet.";
+      }
+    });
   </script>
 </body>
 </html>

@@ -45,10 +45,42 @@ TOLLDNS_URL = "https://app.cardetailingreno.com/tolldns-install"
 GITHUB_SIGNUP_URL = "https://github.com/signup"
 # Optional comma-separated extra frontend origins for CORS.
 CORS_ALLOWED_ORIGINS = "https://app.cardetailingreno.com"
+# Optional comma-separated blacklist overrides for reference-site filtering.
+# REFERENCE_SITE_BLOCKLIST = "example.com,another-example.com"
+# REFERENCE_SITE_BLOCKLIST_KEYWORDS = "news,entertainment"
 # Monthly traffic threshold used as an upgrade signal.
 UPGRADE_TRAFFIC_THRESHOLD = "2000"
 # Optional public Turnstile site key for frontend challenge.
 TURNSTILE_SITE_KEY = ""
+# Optional WalletConnect Project ID for wallet login in the frontend.
+WALLETCONNECT_PROJECT_ID = ""
+# Optional internal key for /build/brief endpoint.
+BUILD_BRIEF_DEBUG_KEY = ""
+# Premium token metering config (SPL-ready).
+PREMIUM_BUILDER_ENABLED = "true"
+PREMIUM_WALLET_REQUIRED = "true"
+PREMIUM_SPL_SYMBOL = "TOLLSPL"
+PREMIUM_POINTS_ENABLED = "true"
+PREMIUM_POINTS_SYMBOL = "PTS"
+PREMIUM_FREE_TOKENS = "1200"
+PREMIUM_FREE_POINTS = "800"
+PREMIUM_TOKENS_PER_SPL = "1000"
+PREMIUM_POINTS_PER_TOKEN = "1"
+PREMIUM_BASE_COST_TOKENS = "180"
+PREMIUM_PER_PAGE_COST_TOKENS = "90"
+PREMIUM_PER_30_WORD_COST_TOKENS = "8"
+PREMIUM_COMPLEXITY_UNIT_COST_TOKENS = "30"
+# Optional hosted top-up page.
+PREMIUM_TOPUP_URL = "https://app.cardetailingreno.com/premium/topup"
+PREMIUM_POINTS_TOPUP_URL = "https://app.cardetailingreno.com/premium/points"
+PREMIUM_POINTS_PACK_PRICE_USD = "9.99"
+PREMIUM_POINTS_PACK_AMOUNT = "1200"
+# Optional direct checkout URL for point packs (Stripe/merchant checkout).
+PREMIUM_POINTS_CHECKOUT_URL = "https://app.cardetailingreno.com/premium/points/buy"
+# Optional ad-reward points (rewarded after verified ad completion webhook).
+PREMIUM_AD_REWARDS_ENABLED = "true"
+PREMIUM_AD_REWARD_POINTS = "40"
+PREMIUM_AD_REWARD_COOLDOWN_SEC = "300"
 
 # Optional secret:
 # wrangler secret put OPENAI_API_KEY
@@ -58,3 +90,7 @@ TURNSTILE_SITE_KEY = ""
 # wrangler secret put CREDENTIAL_VAULT_KEY
 # Optional secret:
 # wrangler secret put TURNSTILE_SECRET_KEY
+# Optional secret for signed point-credit webhook calls to /billing/points/credit:
+# wrangler secret put PREMIUM_POINTS_WEBHOOK_SECRET
+# Optional secret for signed ad-reward callbacks to /billing/points/ad/reward:
+# wrangler secret put PREMIUM_AD_REWARD_WEBHOOK_SECRET
