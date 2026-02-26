@@ -1,0 +1,13 @@
+{
+  "name": "AI WebAdmin (Cloudflare Worker)",
+  "slug": "ai-webadmin",
+  "version": "0.2.25",
+  "requires": "6.0",
+  "tested": "6.8",
+  "requires_php": "7.4",
+  "last_updated": "2026-02-25",
+  "homepage": "https://app.cardetailingreno.com/plugin-free/",
+  "download_url": "https://app.cardetailingreno.com/downloads/ai-webadmin.zip",
+  "description": "Connects WordPress to AI WebAdmin workers for comment moderation, security workflows, Cloudflare onboarding, and audit automation.",
+  "changelog": "<h4>0.2.25</h4><ul><li>Added per-image AI action in Media Library: <code>AI Optimize + Offload to R2</code>.</li><li>Added bulk Media Library action and full-library run button to process all images.</li><li>Added Worker endpoint <code>/plugin/wp/media/enrich</code> for OpenAI-generated title/alt/caption/description/filename metadata from image content.</li><li>Media offload pipeline now calls AI enrichment before rename/optimization and stores metadata source.</li><li>Improved vault decryption to support <code>CREDENTIAL_VAULT_KEY</code>, <code>GITHUB_VAULT_KEY</code>, or shared-secret fallback.</li></ul>"
+}

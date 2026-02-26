@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#f4f6fb"/>
+  <rect x="80" y="80" width="1040" height="540" rx="16" fill="#fff" stroke="#d7dce8"/>
+  <text x="120" y="150" font-size="30" font-family="Arial" fill="#1d2433" font-weight="700">Permission: Zone -> DNS -> Edit</text>
+  <rect x="120" y="200" width="960" height="130" rx="10" fill="#f7f9ff" stroke="#cfd6e6"/>
+  <text x="150" y="280" font-size="25" font-family="Arial" fill="#26324a">DNS : Edit</text>
+  <rect x="120" y="370" width="960" height="180" rx="12" fill="#e7f4ea" stroke="#29a34a" stroke-width="3"/>
+  <text x="150" y="430" font-size="24" font-family="Arial" fill="#17642b">Needed for:</text>
+  <text x="150" y="468" font-size="22" font-family="Arial" fill="#17642b">Managed DNS updates for protected forms/routing and zone workflow tasks.</text>
+  <text x="150" y="506" font-size="22" font-family="Arial" fill="#17642b">Scope token to only the required zone(s).</text>
+</svg>

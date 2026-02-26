@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#f4f6fb"/>
+  <rect x="70" y="60" width="1060" height="580" rx="16" fill="#fff" stroke="#d7dce8"/>
+  <text x="110" y="130" font-size="34" font-family="Arial" fill="#1d2433" font-weight="700">Create Cloudflare Account</text>
+  <text x="110" y="190" font-size="24" font-family="Arial" fill="#44506a">1) Go to cloudflare.com and click Sign Up</text>
+  <text x="110" y="230" font-size="24" font-family="Arial" fill="#44506a">2) Verify email</text>
+  <text x="110" y="270" font-size="24" font-family="Arial" fill="#44506a">3) Add your domain to Cloudflare</text>
+  <text x="110" y="310" font-size="24" font-family="Arial" fill="#44506a">4) Update registrar nameservers to Cloudflare</text>
+  <rect x="110" y="360" width="980" height="200" rx="12" fill="#fff4e5" stroke="#e49d39" stroke-width="3"/>
+  <text x="140" y="420" font-size="24" font-family="Arial" fill="#8a4e05">Why this step matters:</text>
+  <text x="140" y="460" font-size="22" font-family="Arial" fill="#8a4e05">Without Cloudflare account + zone control, Worker cannot verify and enforce DNS/security workflows.</text>
+</svg>

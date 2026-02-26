@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "bs58": "^6.0.0",
+    "tweetnacl": "^1.0.3",
+    "viem": "^2.39.0"
+  },
   "scripts": {
     "test": "node --test",
     "dev:onboarding": "npx wrangler@latest dev",

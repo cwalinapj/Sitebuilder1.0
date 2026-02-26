@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Install TollDNS</title>
+  <style>
+    body { font-family: system-ui; max-width: 760px; margin: 36px auto; padding: 0 16px; color: #111; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 18px; }
+    .btn { display: inline-block; padding: 12px 14px; border-radius: 10px; text-decoration: none; border: 1px solid #111; }
+    .btn.primary { background: #111; color: #fff; }
+    .muted { color: #555; }
+    ol { line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <h1>Install TollDNS</h1>
+  <p class="muted">Step 3 of 4 (required for free tier)</p>
+
+  <div class="card">
+    <ol>
+      <li>Download TollDNS plugin zip.</li>
+      <li>In WordPress, go to <strong>Plugins -> Add New -> Upload Plugin</strong>, then upload and activate it.</li>
+      <li>Open <strong>Settings -> TollDNS</strong> and set your monitored domain + nameservers.</li>
+      <li>Run a nameserver check and confirm points are increasing.</li>
+      <li>Return to AI-WebAdmin and complete Cloudflare connect verification.</li>
+    </ol>
+    <p>
+      <a class="btn primary" href="/downloads/tolldns.zip">Download TollDNS Plugin (.zip)</a>
+      <a class="btn" href="/plugin-free">Back to AI-WebAdmin Plugin</a>
+      <a class="btn" href="https://github.com/signup" target="_blank" rel="noopener noreferrer">Optional: Connect GitHub</a>
+    </p>
+    <p class="muted">If you're already in wp-admin, use: Plugins -> Add New -> Upload Plugin.</p>
+  </div>
+</body>
+</html>

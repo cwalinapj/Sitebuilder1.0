@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#f4f6fb"/>
+  <rect x="80" y="70" width="1040" height="560" rx="16" fill="#ffffff" stroke="#d5d9e6"/>
+  <rect x="80" y="70" width="1040" height="56" rx="16" fill="#1d2433"/>
+  <text x="120" y="106" fill="#fff" font-size="24" font-family="Arial">AI WebAdmin -> Sandbox &amp; Secrets Tab</text>
+  <text x="120" y="190" fill="#1d2433" font-size="28" font-family="Arial" font-weight="700">Upload Secrets To Worker Vault</text>
+  <rect x="120" y="240" width="940" height="220" rx="10" fill="#fbfcff" stroke="#cfd6e6"/>
+  <text x="145" y="290" fill="#273247" font-size="22" font-family="Arial">Cloudflare API Token</text>
+  <text x="145" y="340" fill="#273247" font-size="22" font-family="Arial">GitHub Fine-Grained Token</text>
+  <text x="145" y="390" fill="#273247" font-size="22" font-family="Arial">Hosting Provider API Token</text>
+  <rect x="700" y="510" width="360" height="74" rx="12" fill="#15632a"/>
+  <text x="742" y="556" fill="#fff" font-size="24" font-family="Arial">Upload Secrets To Worker Vault</text>
+</svg>

@@ -1,4 +1,85 @@
 const inspectorRateLimitMap = new Map();
+const MARKET_BLOCKED_ROOT_DOMAINS = new Set([
+  "wordpress.com",
+  "medium.com",
+  "blogger.com",
+  "wix.com",
+  "tumblr.com",
+  "weebly.com",
+  "google.com",
+  "livejournal.com",
+  "zoho.com",
+  "hubpages.com",
+  "reddit.com",
+  "trustpilot.com",
+  "crunchbase.com",
+  "angel.co",
+  "angellist.com",
+  "yellowpages.com",
+  "justlanded.com",
+  "reviewcentre.com",
+  "blogarama.com",
+  "lacartes.com",
+  "tupalo.com",
+  "ebusinesspages.com",
+  "seekingalpha.com",
+  "ehow.com",
+  "biggerpockets.com",
+  "brighthub.com",
+  "articlesfactory.com",
+  "articlealley.com",
+  "webpronews.com",
+  "idleexperts.com",
+  "sharehealthtips.com",
+  "uberarticles.com",
+  "youtube.com",
+  "facebook.com",
+  "instagram.com",
+  "wikipedia.org",
+  "twitter.com",
+  "linkedin.com",
+  "pinterest.com",
+  "tiktok.com",
+  "amazon.com",
+  "freefind.com",
+  "viesearch.com",
+  "ontoplist.com",
+  "exactseek.com",
+  "000directory.com.ar",
+  "directory6.org",
+  "submissionwebdirectory.com",
+  "cipinet.com",
+  "linkz.us",
+  "somuch.com",
+  "vk.com",
+  "behance.net",
+  "soundcloud.com",
+  "dribbble.com",
+  "issuu.com",
+  "flickr.com",
+  "squarespace.com",
+  "webstarts.com",
+  "micro.blog",
+  "latimes.com",
+  "netflix.com",
+  "hbo.com",
+  "hbomax.com",
+  "hulu.com",
+  "disneyplus.com",
+  "tripadvisor.com",
+  "yelp.com",
+]);
+const MARKET_BLOCKED_HOST_KEYWORDS = ["news", "entertainment", "streaming", "movies", "tv"];
+const MARKET_DEFAULT_QUERY_EXCLUDE_DOMAINS = [
+  "yelp.com",
+  "tripadvisor.com",
+  "yellowpages.com",
+  "wikipedia.org",
+  "facebook.com",
+  "instagram.com",
+  "reddit.com",
+  "youtube.com",
+];
 
 function consumeInspectorRateLimit(ip, bucket, ts, windowMs, max) {
   const ipKey = String(ip || "anon").trim() || "anon";
@@ -62,6 +143,23 @@ export default {
       String(request.headers.get("CF-Connecting-IP") || "").trim() ||
       String(request.headers.get("x-forwarded-for") || "").split(",")[0].trim() ||
       "anon";
+    const configuredMarketBlockedRoots = new Set(
+      String(env.REFERENCE_SITE_BLOCKLIST || "")
+        .split(",")
+        .map((x) => x.trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const configuredMarketBlockedKeywords = String(env.REFERENCE_SITE_BLOCKLIST_KEYWORDS || "")
+      .split(",")
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+    const marketQueryExcludeDomains = Array.from(
+      new Set([
+        ...MARKET_DEFAULT_QUERY_EXCLUDE_DOMAINS,
+        ...MARKET_BLOCKED_ROOT_DOMAINS,
+        ...configuredMarketBlockedRoots,
+      ])
+    );
     const toHttpsUrl = (raw) => {
       const s = String(raw || "").trim();
       if (!s) return null;
@@ -229,6 +327,120 @@ export default {
         if (hay.includes(needle)) return label;
       }
       return null;
+    }
+
+    function inferHostingTypeAndCost({
+      hostingCompany = null,
+      serverHeader = null,
+      poweredBy = null,
+      rdapIp = null,
+      cnameRecords = [],
+      nsRecords = [],
+      platformHint = null,
+    } = {}) {
+      const rdapName = String(rdapIp?.name || "").toLowerCase();
+      const signals = [
+        hostingCompany,
+        serverHeader,
+        poweredBy,
+        rdapIp?.name || null,
+        rdapIp?.handle || null,
+        ...(Array.isArray(cnameRecords) ? cnameRecords : []),
+        ...(Array.isArray(nsRecords) ? nsRecords : []),
+        platformHint,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      const pushUnique = (arr, value) => {
+        const v = String(value || "").trim();
+        if (!v || arr.includes(v)) return;
+        arr.push(v);
+      };
+
+      const rationale = [];
+      let hostingType = "unknown";
+      let minUsd = 5;
+      let maxUsd = 80;
+      let confidence = "low";
+
+      const explicitEdgeSignals = /workers\.dev|pages\.dev/.test(signals);
+      const proxySignalsOnly = /cloudflare/.test(signals) && !explicitEdgeSignals;
+      const rdapIndicatesCompute = /linode|akamai|digitalocean|vultr|hetzner|ovh|amazon|aws|google|microsoft|azure/.test(rdapName);
+      const rdapIndicatesShared = /hostgator|bluehost|godaddy|namecheap|dreamhost|siteground|hostinger|a2/.test(rdapName);
+
+      if (explicitEdgeSignals) {
+        hostingType = "edge_serverless_or_static";
+        minUsd = 0;
+        maxUsd = 20;
+        confidence = "medium";
+        pushUnique(rationale, "Signals point to an edge/static or serverless delivery layer.");
+      } else if (rdapIndicatesCompute) {
+        hostingType = "vps_or_cloud_vm";
+        minUsd = 4;
+        maxUsd = 120;
+        confidence = "medium";
+        pushUnique(rationale, "IP ownership points to cloud/VPS infrastructure.");
+      } else if (rdapIndicatesShared) {
+        hostingType = "shared_hosting";
+        minUsd = 3;
+        maxUsd = 30;
+        confidence = "medium";
+        pushUnique(rationale, "IP ownership points to a shared hosting provider.");
+      } else if (proxySignalsOnly) {
+        hostingType = "cdn_proxy_fronted_hosting";
+        minUsd = 5;
+        maxUsd = 60;
+        confidence = "low";
+        pushUnique(rationale, "Cloudflare-like proxy signals found; origin host appears behind CDN.");
+      } else if (/vercel|netlify/i.test(signals)) {
+        hostingType = "static_or_serverless_platform";
+        minUsd = 0;
+        maxUsd = 40;
+        confidence = "medium";
+        pushUnique(rationale, "Signals match a managed static/serverless platform.");
+      } else if (/wp engine|wpengine|kinsta|siteground|flywheel/i.test(signals)) {
+        hostingType = "managed_wordpress";
+        minUsd = 20;
+        maxUsd = 120;
+        confidence = "medium";
+        pushUnique(rationale, "Signals match a managed WordPress host.");
+      } else if (/godaddy|hostgator|bluehost|namecheap|dreamhost|a2hosting|hostinger/i.test(signals)) {
+        hostingType = "shared_hosting";
+        minUsd = 3;
+        maxUsd = 30;
+        confidence = "medium";
+        pushUnique(rationale, "Signals match a shared hosting provider.");
+      } else if (/digitalocean|linode|akamai|vultr|hetzner|ovh|amazon|aws|azure|google cloud|gcp/i.test(signals)) {
+        hostingType = "vps_or_cloud_vm";
+        minUsd = 4;
+        maxUsd = 120;
+        confidence = "low";
+        pushUnique(rationale, "Signals match cloud/VPS infrastructure; pricing depends heavily on instance size and traffic.");
+      }
+
+      if (platformHint === "wordpress" && hostingType === "unknown") {
+        hostingType = "wordpress_or_php_hosting";
+        minUsd = 5;
+        maxUsd = 60;
+        confidence = "low";
+        pushUnique(rationale, "WordPress platform detected, but host class is not explicit from public signals.");
+      }
+      if (hostingType === "unknown") {
+        pushUnique(rationale, "Public DNS/header signals are limited, so this is a broad estimate.");
+      }
+
+      return {
+        hosting_type_hint: hostingType,
+        hosting_cost_estimate: {
+          monthly_min_usd: minUsd,
+          monthly_max_usd: maxUsd,
+          confidence,
+          rationale: rationale.slice(0, 3),
+          source: "public_dns_headers_rdap",
+        },
+      };
     }
 
     function inferServerHardwareHints(responseHeaders, rdapIp = null, hostingCompany = null) {
@@ -446,7 +658,7 @@ export default {
       return vendors;
     }
 
-    async function buildDnsAndInfraProfile(finalUrl, responseHeaders, html) {
+    async function buildDnsAndInfraProfile(finalUrl, responseHeaders, html, platformHint = null) {
       try {
         const parsed = new URL(finalUrl);
         const hostname = parsed.hostname;
@@ -479,10 +691,28 @@ export default {
           .filter(Boolean)
           .join(" ");
 
-        const hostingCompany = guessHostingCompanyFromSignals(providerSignals) || rdapIp?.name || null;
+        let hostingCompany = guessHostingCompanyFromSignals(providerSignals) || rdapIp?.name || null;
+        const rdapOrg = String(rdapIp?.name || "").trim();
+        if (rdapOrg) {
+          const hostGuessLower = String(hostingCompany || "").toLowerCase();
+          if (!hostingCompany || /cloudflare|cdn|proxy/i.test(hostGuessLower)) {
+            hostingCompany = rdapOrg;
+          }
+        }
+        const hostingProfile = inferHostingTypeAndCost({
+          hostingCompany,
+          serverHeader,
+          poweredBy,
+          rdapIp,
+          cnameRecords,
+          nsRecords,
+          platformHint,
+        });
         const emailProvider = inferEmailProvider(mxRecords);
         const vendors = detectThirdPartyVendors(html);
         const serverHardwareHints = inferServerHardwareHints(responseHeaders, rdapIp, hostingCompany);
+        const aRecordIps = aRecords.slice(0, 12);
+        const ipAddresses = [...aRecords, ...aaaaRecords].slice(0, 12);
 
         return {
           dns_profile: {
@@ -501,8 +731,12 @@ export default {
             domain_expires_at: rdapDomain?.expires_at || null,
             server_header: serverHeader,
             powered_by: poweredBy,
-            ip_addresses: [...aRecords, ...aaaaRecords].slice(0, 12),
+            ip_addresses: ipAddresses,
+            a_record_primary_ip: aRecordIps[0] || null,
+            a_record_ips: aRecordIps,
             hosting_company: hostingCompany,
+            hosting_type_hint: hostingProfile.hosting_type_hint,
+            hosting_cost_estimate: hostingProfile.hosting_cost_estimate,
             rdap_domain: rdapDomain || null,
             rdap_ip: rdapIp || null,
             server_hardware_hints: serverHardwareHints,
@@ -620,7 +854,7 @@ export default {
       let vendors = detectThirdPartyVendors(html);
       let link_audit = { checked_count: 0, broken_count: 0, broken_paths: [] };
       if (deepIntelligence) {
-        const intel = await buildDnsAndInfraProfile(final_url, r.headers, html);
+        const intel = await buildDnsAndInfraProfile(final_url, r.headers, html, basics.platform_hint);
         dns_profile = intel?.dns_profile || null;
         infrastructure = intel?.infrastructure || null;
         vendors = intel?.vendors || vendors;
@@ -685,6 +919,42 @@ export default {
       }
     }
 
+    async function searchWithBing(query, limit = 3) {
+      const apiKey = String(env.BING_SEARCH_API_KEY || "").trim();
+      if (!apiKey) return [];
+
+      try {
+        const endpoint = String(env.BING_SEARCH_ENDPOINT || "https://api.bing.microsoft.com/v7.0/search").trim();
+        const u = new URL(endpoint);
+        u.searchParams.set("q", query);
+        u.searchParams.set("count", String(Math.min(Math.max(Number(limit) || 3, 1), 10)));
+        u.searchParams.set("responseFilter", "Webpages");
+        u.searchParams.set("textFormat", "Raw");
+        u.searchParams.set("safeSearch", "Moderate");
+        u.searchParams.set("mkt", String(env.BING_MARKET || "en-US"));
+
+        const r = await fetch(u.toString(), {
+          headers: {
+            "Ocp-Apim-Subscription-Key": apiKey,
+            "User-Agent": "Mozilla/5.0 (compatible; SiteInspector/1.0)",
+          },
+        });
+        if (!r.ok) return [];
+        const data = await r.json().catch(() => null);
+        const values = Array.isArray(data?.webPages?.value) ? data.webPages.value : [];
+        return values
+          .map((item) => ({
+            title: String(item?.name || "Website").slice(0, 180),
+            url: toHttpsUrl(item?.url),
+            snippet: String(item?.snippet || "").slice(0, 300),
+          }))
+          .filter((item) => item.url)
+          .slice(0, limit);
+      } catch {
+        return [];
+      }
+    }
+
     async function searchWithDuckDuckGo(query, limit = 3) {
       const u = new URL("https://duckduckgo.com/html/");
       u.searchParams.set("q", query);
@@ -717,9 +987,28 @@ export default {
       return results;
     }
 
+    function isBlacklistedMarketHost(hostname) {
+      const h = String(hostname || "").toLowerCase().trim();
+      if (!h) return true;
+      const root = rootDomainFromHostname(h) || h;
+      if (
+        MARKET_BLOCKED_ROOT_DOMAINS.has(h) ||
+        MARKET_BLOCKED_ROOT_DOMAINS.has(root) ||
+        configuredMarketBlockedRoots.has(h) ||
+        configuredMarketBlockedRoots.has(root)
+      ) {
+        return true;
+      }
+      const keywordHit =
+        MARKET_BLOCKED_HOST_KEYWORDS.some((k) => h.includes(k) || root.includes(k)) ||
+        configuredMarketBlockedKeywords.some((k) => h.includes(k) || root.includes(k));
+      return keywordHit;
+    }
+
     function isAggregatorHost(hostname) {
       const h = String(hostname || "").toLowerCase();
       return (
+        isBlacklistedMarketHost(h) ||
         h.endsWith("yelp.com") ||
         h.endsWith("tripadvisor.com") ||
         h.endsWith("yellowpages.com") ||
@@ -749,6 +1038,7 @@ export default {
       try {
         const u = new URL(toHttpsUrl(rawUrl));
         if (!/^https?:$/.test(u.protocol)) return false;
+        if (isBlacklistedMarketHost(u.hostname)) return false;
         if (isAggregatorHost(u.hostname)) return false;
         if (isDirectoryLikePathname(u.pathname) && u.searchParams.toString()) return false;
         return true;
@@ -1129,23 +1419,31 @@ export default {
       if (!session_id) return json({ ok: false, error: "session_id required" }, 400);
 
       const yelpDescriptor = intent_text || business_type;
+      const exclusionQuery = marketQueryExcludeDomains
+        .slice(0, 30)
+        .map((domain) => `-site:${domain}`)
+        .join(" ");
       const query =
         (`top ${business_type} business websites` +
           (intent_text ? ` focused on ${intent_text}` : "") +
           (location ? ` near ${location}` : "")) +
-        " -site:yelp.com -site:tripadvisor.com -site:yellowpages.com -site:visit*.com";
+        (exclusionQuery ? ` ${exclusionQuery}` : "");
       const request_id = newId("market");
 
-      let source = "duckduckgo";
-      let sites = await searchWithYelpBusinessSites(yelpDescriptor, location, Math.max(limit * 2, 5));
-      if (sites && sites.length) {
-        source = "yelp_business_sites";
-      } else {
-        sites = await searchWithOpenAI(query, Math.max(limit * 2, 5));
-        if (!sites || !sites.length) {
-          sites = await searchWithDuckDuckGo(query, Math.max(limit * 2, 5));
+      let source = "openai_web_search";
+      let sites = await searchWithOpenAI(query, Math.max(limit * 2, 5));
+      if (!sites || !sites.length) {
+        sites = await searchWithBing(query, Math.max(limit * 2, 5));
+        if (sites && sites.length) {
+          source = "bing_web_search";
         } else {
-          source = "openai_web_search";
+          sites = await searchWithYelpBusinessSites(yelpDescriptor, location, Math.max(limit * 2, 5));
+          if (sites && sites.length) {
+            source = "yelp_business_sites";
+          } else {
+            source = "duckduckgo";
+            sites = await searchWithDuckDuckGo(query, Math.max(limit * 2, 5));
+          }
         }
       }
 

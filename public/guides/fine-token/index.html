@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cloudflare + GitHub Token Guide</title>
+  <style>
+    :root { --ink:#1d2433; --line:#d5d9e6; --muted:#4f5b72; --bg:#f5f7fc; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+    .wrap { max-width: 1020px; margin: 28px auto; padding: 0 16px 40px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:18px; }
+    h1 { margin: 0 0 10px; }
+    h2 { margin: 0 0 10px; font-size: 22px; }
+    h3 { margin: 0 0 8px; font-size: 18px; }
+    p { color: var(--muted); line-height: 1.45; }
+    ol { line-height: 1.55; }
+    ul { line-height: 1.5; }
+    img { width: 100%; border:1px solid var(--line); border-radius: 10px; background:#fff; }
+    .btn { display:inline-block; padding:10px 14px; border:1px solid var(--ink); border-radius:10px; text-decoration:none; color:var(--ink); }
+    .btn.primary { background:var(--ink); color:#fff; }
+    .warn { border-left:4px solid #e49d39; padding-left:10px; color:#6a4500; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Cloudflare + GitHub Token Guide (with screenshots)</h1>
+    <p>AI WebAdmin stays locked until Cloudflare and GitHub tokens are verified, uploaded to Worker vault, and cached as masked secrets.</p>
+
+    <div class="card">
+      <h2>Step 1: Create Cloudflare account and add your domain</h2>
+      <ol>
+        <li>Go to <a href="https://cloudflare.com" target="_blank" rel="noopener noreferrer">cloudflare.com</a> and sign up.</li>
+        <li>Verify your email, then add your domain/zone.</li>
+        <li>Update registrar nameservers to Cloudflare nameservers shown in dashboard.</li>
+      </ol>
+      <p class="warn">Without account + zone control, Worker cannot securely verify or run DNS-backed workflows.</p>
+      <img src="/assets/screenshots/cf-signup-step.svg" alt="Cloudflare signup and zone setup screenshot description" />
+    </div>
+
+    <div class="card">
+      <h2>Step 2: Create Cloudflare API token</h2>
+      <ol>
+        <li>Open API tokens page.</li>
+        <li>Create token scoped only to needed account and zone.</li>
+        <li>Use permissions below exactly.</li>
+      </ol>
+      <p>
+        <a class="btn primary" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">Open Cloudflare API Tokens</a>
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Permission 1 (Enable)</h2>
+      <h3>Account -> Workers Scripts -> Edit</h3>
+      <p>Lets Worker workflows manage script-connected operations for automation. Keep scope narrow.</p>
+      <img src="/assets/screenshots/cf-perm-workers-edit.svg" alt="Workers Scripts Edit permission screenshot description" />
+    </div>
+
+    <div class="card">
+      <h2>Permission 2 (Enable)</h2>
+      <h3>Zone -> DNS -> Edit</h3>
+      <p>Required for DNS-based routing/protection workflows and controlled record updates.</p>
+      <img src="/assets/screenshots/cf-perm-dns-edit.svg" alt="Zone DNS Edit permission screenshot description" />
+    </div>
+
+    <div class="card">
+      <h2>Permission 3 (Enable)</h2>
+      <h3>Zone -> Zone Settings -> Read</h3>
+      <p>Read-only checks so Worker can verify current zone state before actions.</p>
+      <img src="/assets/screenshots/cf-perm-zone-read.svg" alt="Zone Settings Read permission screenshot description" />
+    </div>
+
+    <div class="card">
+      <h2>Step 3: Put token in plugin and verify</h2>
+      <ol>
+        <li>In WordPress: <strong>Settings -> AI WebAdmin -> General</strong>.</li>
+        <li>Paste token into <strong>Cloudflare API Token (paste to verify/connect)</strong>.</li>
+        <li>Click <strong>Save Changes</strong>.</li>
+      </ol>
+      <img src="/assets/screenshots/token-step-3.svg" alt="Paste cloudflare token in plugin screenshot description" />
+    </div>
+
+    <div class="card">
+      <h2>Step 4: Upload secrets to Worker vault (required)</h2>
+      <ol>
+        <li>Open <strong>Settings -> AI WebAdmin -> Sandbox &amp; Secrets</strong>.</li>
+        <li>Paste Cloudflare token and GitHub token.</li>
+        <li>Click <strong>Upload Secrets To Worker Vault</strong>.</li>
+        <li>Confirm masked values appear in status lines.</li>
+      </ol>
+      <img src="/assets/screenshots/token-step-4.svg" alt="Upload tokens to worker vault screenshot description" />
+    </div>
+
+    <div class="card">
+      <h2>Step 5: Create GitHub token and cache it</h2>
+      <ol>
+        <li>Create/sign in at <a href="https://github.com" target="_blank" rel="noopener noreferrer">github.com</a>.</li>
+        <li>Create Fine-Grained PAT with repo read/write for backup repo.</li>
+        <li>Upload it in <strong>Sandbox &amp; Secrets</strong> tab, or use GitHub token field under Automation.</li>
+      </ol>
+      <p class="warn">AI WebAdmin activation remains locked until both Cloudflare and GitHub vault tokens are present.</p>
+    </div>
+
+    <div class="card">
+      <h2>After activation unlock</h2>
+      <ul>
+        <li>Run <strong>Sandbox Preflight</strong> to test plugin updates non-persistently.</li>
+        <li>Review risk level and outdated plugin list before real updates.</li>
+      </ul>
+      <p>
+        <a class="btn" href="/plugin-free">Back to Install Steps</a>
+        <a class="btn" href="/connect-cloudflare">Back to Connect Cloudflare</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

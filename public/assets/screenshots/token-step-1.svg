@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#f4f6fb"/>
+  <rect x="80" y="70" width="1040" height="560" rx="16" fill="#ffffff" stroke="#d5d9e6"/>
+  <rect x="80" y="70" width="1040" height="56" rx="16" fill="#1d2433"/>
+  <text x="120" y="106" fill="#fff" font-size="24" font-family="Arial">Cloudflare Dashboard</text>
+  <text x="120" y="190" fill="#1d2433" font-size="30" font-family="Arial" font-weight="700">My Profile -> API Tokens</text>
+  <rect x="120" y="230" width="540" height="90" rx="10" fill="#f7f8fc" stroke="#cfd6e6"/>
+  <text x="145" y="286" fill="#273247" font-size="26" font-family="Arial">Create Token</text>
+  <rect x="760" y="210" width="280" height="120" rx="12" fill="#fff4e5" stroke="#e49d39" stroke-width="3"/>
+  <text x="786" y="270" fill="#8a4e05" font-size="22" font-family="Arial">Click this</text>
+  <path d="M760 270 L680 270" stroke="#e49d39" stroke-width="4" marker-end="url(#a)"/>
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <polygon points="0 0, 8 4, 0 8" fill="#e49d39"/>
+    </marker>
+  </defs>
+</svg>

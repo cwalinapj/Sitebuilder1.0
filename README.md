@@ -167,6 +167,22 @@ When the user agrees to view examples:
   - Point packs (default `$9.99`) via standard merchant checkout URL.
   - Optional ad-reward points for users who watch verified ads.
 
+## SPL Anchor Rail (Scaffold Added)
+
+- On-chain billing scaffold is now included at:
+  - `solana/anchor-premium-billing`
+- It provides:
+  1. PDA config + vault for your SPL billing mint.
+  2. One-time free grant per wallet+session hash.
+  3. Per-session premium charge instruction (user-signed).
+  4. Vault withdrawal for treasury operations.
+- This is designed to pair with current worker endpoints:
+  - Wallet path: SPL charges.
+  - Non-wallet path: off-chain points (unchanged).
+- Surfpool files were generated and included (`txtx.yml`, `runbooks/`) plus helper scripts:
+  - `solana/anchor-premium-billing/scripts/start_surfpool.sh`
+  - `solana/anchor-premium-billing/scripts/create_test_mint.sh`
+
 ## Database Migrations
 
 Apply all migration files:

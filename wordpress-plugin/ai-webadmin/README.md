@@ -12,10 +12,18 @@ This plugin connects WordPress comments to your Cloudflare Worker endpoint for A
 - `POST /plugin/wp/github/vault`
 4. Signed snapshot backup push requests:
 - `POST /plugin/wp/backup/snapshot`
+5. Signed sandbox preflight requests:
+- `POST /plugin/wp/sandbox/preflight`
+6. Signed direct secret-vault uploads:
+- `POST /plugin/wp/secrets/vault`
 5. Signed email-forwarding config sync:
 - `POST /plugin/wp/email/forward/config`
 6. Signed lead-email forwarding events:
 - `POST /plugin/wp/lead/forward`
+7. Signed lead-forward verification handshake:
+- `POST /plugin/wp/email/forward/verification/start`
+- `POST /plugin/wp/email/forward/verification/status`
+- `GET /plugin/wp/email/forward/verification/confirm`
 7. Signed hosting/control-panel access profile sync:
 - `POST /plugin/wp/access/profile` (usernames/public SSH keys/scoped tokens only; plaintext passwords rejected)
 
@@ -75,14 +83,15 @@ This plugin connects WordPress comments to your Cloudflare Worker endpoint for A
 2. `Plugin Shared Secret`
 - Must match Worker env var `WP_PLUGIN_SHARED_SECRET`.
 
-3. `Onboarding Session ID` (recommended)
-- Allows plugin telemetry (email queue / outdated plugins / pending comment moderation count) to appear in chat audit output.
+3. `Onboarding Session ID` (required for activation)
+- Required for signed Worker sync endpoints and secret-vault workflows.
 
 4. `Enable comment moderation via Worker`
 - Enable to process new comments asynchronously via WP-Cron.
 
 5. `Require TollDNS`
 - Keep enabled for free-tier policy enforcement.
+- Install TollDNS from: `https://app.cardetailingreno.com/tolldns-install/`
 
 6. Security hardening (recommended defaults):
 - `Enable hardening controls`
@@ -110,6 +119,7 @@ This plugin connects WordPress comments to your Cloudflare Worker endpoint for A
 - `Lead forward destination email` (optional; defaults to primary admin email)
 - `Suppress local lead-email delivery after Worker accepts event`
 - Worker also stores MX/provider hints for forwarding profile personalization.
+- Local WordPress lead-email suppression stays OFF until email-link verification status is `verified`.
 
 10. Unlock options:
 - `Require passcode unlock on login`
@@ -151,3 +161,15 @@ Set in Worker environment:
 - WordPress XML-RPC docs: https://wordpress.org/documentation/article/xml-rpc-support/
 - Cloudflare Access (SSO for apps): https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/
 - Cloudflare WAF guidance: https://developers.cloudflare.com/waf/
+11. Sandbox & Secrets tab:
+- Run non-persistent sandbox preflight before applying plugin updates.
+- Upload Cloudflare/GitHub/hosting API tokens directly to Worker vault.
+- Use setup screenshots: `https://app.cardetailingreno.com/guides/fine-token/`.
+
+12. Activation lock policy:
+- AI WebAdmin features remain disabled until all are true:
+  - TollDNS installed + active (when required)
+  - Cloudflare token verified in plugin
+  - GitHub token verified in plugin
+  - Cloudflare token uploaded to Worker vault (masked cached status visible)
+  - GitHub token uploaded to Worker vault (masked cached status visible)

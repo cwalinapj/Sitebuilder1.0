@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connect Cloudflare</title>
+  <style>
+    body { font-family: system-ui; max-width: 760px; margin: 36px auto; padding: 0 16px; color: #111; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 18px; }
+    .btn { display: inline-block; padding: 12px 14px; border-radius: 10px; text-decoration: none; border: 1px solid #111; }
+    .btn.primary { background: #111; color: #fff; }
+    .muted { color: #555; }
+    ol { line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <h1>Connect Cloudflare</h1>
+  <p class="muted">Step 2 of 4</p>
+
+  <div class="card">
+    <ol>
+      <li>Sign up/sign in to your Cloudflare account and add your domain if not already added.</li>
+      <li>Create a scoped API token for this site/account.</li>
+      <li>In WordPress go to <strong>Settings -> AI WebAdmin -> General</strong>.</li>
+      <li>Paste token into <strong>Cloudflare API Token (paste to verify/connect)</strong>.</li>
+      <li>Click <strong>Save Changes</strong> to send it to Worker for verification.</li>
+      <li>Then go to <strong>Sandbox &amp; Secrets</strong> tab and upload Cloudflare + GitHub tokens to Worker vault.</li>
+    </ol>
+    <p class="muted">Plugin activation remains locked until both Cloudflare and GitHub vault tokens are set.</p>
+    <p>
+      <a class="btn primary" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">Open Cloudflare API Tokens</a>
+      <a class="btn" href="/guides/fine-token/">Token Guide (Screenshots)</a>
+      <a class="btn" href="/tolldns-install">Next: Install TollDNS</a>
+    </p>
+  </div>
+</body>
+</html>

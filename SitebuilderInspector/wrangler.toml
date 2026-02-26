@@ -7,8 +7,29 @@ binding = "DB"
 database_name = "Onboarding_AI_Agent"
 database_id = "6829390f-6695-4f75-8ebb-d367150981ca"
 
+[[r2_buckets]]
+binding = "D2"
+bucket_name = "seo-ai-apify-raw"
+
+[[routes]]
+pattern = "inspector.cardetailingreno.com"
+zone_name = "cardetailingreno.com"
+custom_domain = true
+
+[[secrets_store_secrets]]
+binding = "GitHub"
+store_id = "fe5782b1370b41f6955745550bc0d08f"
+secret_name = "GitHub_PAT"
+
 [vars]
 CORS_ALLOWED_ORIGINS = "https://app.cardetailingreno.com"
+# Optional comma-separated blacklist overrides:
+# REFERENCE_SITE_BLOCKLIST = "example.com,another-example.com"
+# REFERENCE_SITE_BLOCKLIST_KEYWORDS = "news,entertainment"
 
 # Optional:
 # wrangler secret put OPENAI_API_KEY
+# Optional (direct Bing fallback):
+# wrangler secret put BING_SEARCH_API_KEY
+# Optional:
+# wrangler secret put BING_SEARCH_ENDPOINT

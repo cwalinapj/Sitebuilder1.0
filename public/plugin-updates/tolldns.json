@@ -1,0 +1,13 @@
+{
+  "name": "TollDNS",
+  "slug": "tolldns",
+  "version": "0.1.2",
+  "requires": "6.0",
+  "tested": "6.8",
+  "requires_php": "7.4",
+  "last_updated": "2026-02-25",
+  "homepage": "https://app.cardetailingreno.com/tolldns-install/",
+  "download_url": "https://app.cardetailingreno.com/downloads/tolldns.zip",
+  "description": "DNS readiness checks + points ledger for AI WebAdmin free-tier activation.",
+  "changelog": "<h4>0.1.2</h4><ul><li>Added signed ingest endpoint for paid-toll visitor events so domain owners can earn TollDNS points automatically.</li><li>Added ingest shared secret + owner reward settings in TollDNS admin.</li><li>Added 24h paid-toll metrics to points summary and settings dashboard.</li><li>Added duplicate event guard (event_id) to reduce replay/double-crediting risk.</li></ul>"
+}
