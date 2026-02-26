@@ -319,7 +319,8 @@ export default {
         `Nonce: ${nonce}\n` +
         `Issued At: ${new Date(issuedAt).toISOString()}\n` +
         `Expires At: ${new Date(expiresAt).toISOString()}\n` +
-        "Purpose: Start a secure onboarding session without typing your name.";
+        "Purpose: Start a secure onboarding session without typing your name. " +
+        "To instantly enter the lotto and reward you 1200 tokens for today's use.";
 
       walletChallengeMap.set(nonce, {
         nonce,
