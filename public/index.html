@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Sitebuilder Chat</title>
+  <title>Site Builder</title>
   <style>
     :root {
       --bg: #f5f8fb;
@@ -19,8 +19,8 @@
       --btn-border: #ccd9e8;
     }
     body {
-      font-family: system-ui;
-      max-width: 860px;
+      font-family: "Times New Roman", Georgia, serif;
+      max-width: 920px;
       margin: 24px auto;
       padding: 0 12px;
       color: var(--text);
@@ -28,6 +28,15 @@
         radial-gradient(circle at top right, #ddeeff 0%, rgba(221,238,255,0) 35%),
         radial-gradient(circle at bottom left, #dcf6e8 0%, rgba(220,246,232,0) 35%),
         var(--bg);
+    }
+    .pageTitle {
+      text-align: center;
+      font-size: 28px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin: 8px 0 16px;
+      color: #123050;
     }
     #chat {
       border: 1px solid var(--panel-border);
@@ -37,6 +46,7 @@
       overflow: auto;
       background: var(--panel-bg);
       box-shadow: 0 12px 30px rgba(21, 44, 75, 0.08);
+      margin: 0 auto;
     }
     .msg { margin: 10px 0; white-space: pre-wrap; line-height: 1.35; }
     .ai { color: var(--text); }
@@ -190,11 +200,14 @@
       font-size: 15px;
       font-weight: 700;
       color: #153350;
+      text-align: center;
+      letter-spacing: 0.02em;
     }
     .startSub {
       margin-top: 4px;
       color: var(--muted);
       font-size: 13px;
+      text-align: center;
     }
     .startRow {
       display: grid;
@@ -306,7 +319,7 @@
   </style>
 </head>
 <body>
-  <h2>Sitebuilder Chat</h2>
+  <div class="pageTitle">Site Builder</div>
   <div id="startPanel">
     <div class="startTitle">Choose how you want to sign in</div>
     <div class="startSub">Wallet sign-in is one click. No copy/paste of wallet addresses.</div>
