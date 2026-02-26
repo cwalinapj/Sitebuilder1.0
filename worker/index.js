@@ -1311,6 +1311,11 @@ export default {
       } else {
         billing.token_balance = Math.max(0, Math.round(Number(billing.token_balance)));
       }
+      if (hasWallet && !billing.free_granted_at && billing.free_tokens > 0) {
+        const current = Math.max(0, Math.round(Number(billing.token_balance || 0)));
+        billing.token_balance = Math.max(current, billing.free_tokens);
+        billing.free_granted_at = now();
+      }
       if (!Number.isFinite(Number(billing.points_balance))) {
         const starterPoints = !hasWallet && billing.points_enabled ? billing.free_points : 0;
         billing.points_balance = starterPoints;
