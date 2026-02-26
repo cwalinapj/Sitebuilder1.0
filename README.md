@@ -73,6 +73,10 @@ The onboarding worker orchestrates chat state and triggers the inspector worker 
 - `POST /plugin/wp/schema/profile` (signed WordPress schema profile fetch for plugin JSON-LD injection)
 - `POST /plugin/wp/redirects/profile` (signed broken-link redirect profile for plugin 301 fallback rules)
 
+Contract freeze reference:
+
+- `api-contracts.md`
+
 ### Inspector Worker Endpoints
 
 - `POST /inspect` (runs page scan and stores result + DNS/infra/vendor intelligence)
@@ -225,11 +229,12 @@ When a user confirms they own a site and the scan identifies `platform_hint=word
 8. Access vault policy: plaintext passwords are blocked. Use scoped API tokens + SSH public-key auth.
 9. Expiry-driven migration policy: when expiry enters the month-before window, offer free VPS bridge hosting so customer can cancel shared hosting on time while site continuity stays on Cloudflare + GitHub.
 
-## WordPress Plugin (Comment Moderation MVP)
+## WordPress Plugin Split
 
-Plugin source in:
+Plugin source has moved to the dedicated plugin repo boundary (`ai-webadmin-plugin`) and mirrored plugin hosting repository (`web3-wp-plugins`):
 
-- `wordpress-plugin/ai-webadmin`
+- `plugins/ai-webadmin` (in `web3-wp-plugins`)
+- `plugins/tolldns` (in `web3-wp-plugins`)
 
 The plugin can send new comments to Worker moderation and automatically set status to:
 
