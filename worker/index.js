@@ -1197,6 +1197,17 @@ export default {
       };
     }
 
+    function resolvePremiumLlmBackend() {
+      const raw = String(env.PREMIUM_LLM_BACKEND || env.LLM_BACKEND || "").trim().toLowerCase();
+      if (raw) return raw;
+      if (String(env.PREMIUM_LLM_GPU_URL || env.LOCAL_LLM_URL || "").trim()) return "gpu";
+      return "external";
+    }
+
+    function premiumBillingUsesGpu(backend) {
+      return String(backend || "").toLowerCase() === "gpu";
+    }
+
     function resolvePremiumChargeUnit(billing) {
       if (billing?.wallet_verified) return "tokens";
       if (billing?.points_enabled) return "points";
@@ -1278,6 +1289,8 @@ export default {
       billing.free_tokens = normalizedPremiumFreeTokens();
       billing.free_points = normalizedPremiumFreePoints();
       billing.premium_enabled = billing.premium_enabled === true;
+      billing.llm_backend = resolvePremiumLlmBackend();
+      billing.gpu_billing_enabled = premiumBillingUsesGpu(billing.llm_backend);
       billing.wallet_required = premiumWalletRequired();
       billing.wallet_verified = Boolean(hasWallet);
       billing.points_enabled = premiumPointsEnabled();
@@ -1350,6 +1363,24 @@ export default {
       const billing = ensureBillingState(independent, dependent);
       const spendTokens = Math.max(0, Math.round(Number(chargeTokens || 0)));
       const unit = resolvePremiumChargeUnit(billing);
+      if (context?.waive === true) {
+        billing.last_charge = {
+          requested_tokens: spendTokens,
+          charged_amount: 0,
+          unit,
+          context,
+          charged_at: now(),
+        };
+        billing.active_unit = resolvePremiumChargeUnit(billing);
+        billing.updated_at = now();
+        return {
+          ok: true,
+          unit,
+          charged_amount: 0,
+          balance: unit === "points" ? billing.points_balance : billing.token_balance,
+          waived: true,
+        };
+      }
       const spendAmount = unit === "points"
         ? Math.max(1, Math.round(spendTokens * Number(billing.points_per_token || 1)))
         : spendTokens;
@@ -5854,6 +5885,8 @@ ul { margin: 0; padding-left: 18px; }
         premium_point_pack_price_usd: normalizedPointPackPriceUsd(),
         premium_point_pack_points: normalizedPointPackAmount(),
         premium_ad_rewards_enabled: premiumAdRewardsEnabled(),
+        premium_llm_backend: resolvePremiumLlmBackend(),
+        premium_gpu_billing: premiumBillingUsesGpu(resolvePremiumLlmBackend()),
       });
     }
 
@@ -5877,6 +5910,8 @@ ul { margin: 0; padding-left: 18px; }
         points_symbol: premiumPointsSymbol(),
         free_tokens: normalizedPremiumFreeTokens(),
         free_points: normalizedPremiumFreePoints(),
+        llm_backend: resolvePremiumLlmBackend(),
+        gpu_billing_enabled: premiumBillingUsesGpu(resolvePremiumLlmBackend()),
         pricing_model: {
           base_tokens: normalizedPremiumBaseCost(),
           per_page_tokens: normalizedPremiumPerPageCost(),
@@ -5915,14 +5950,16 @@ ul { margin: 0; padding-left: 18px; }
           premium_enabled: billing.premium_enabled === true,
           wallet_required: billing.wallet_required === true,
           wallet_verified: billing.wallet_verified === true,
-          points_enabled: billing.points_enabled === true,
-          active_unit: billing.active_unit,
-          spl_symbol: billing.spl_symbol,
-          points_symbol: billing.points_symbol,
-          token_balance: billing.token_balance,
-          points_balance: billing.points_balance,
-          free_tokens: billing.free_tokens,
-          free_points: billing.free_points,
+        points_enabled: billing.points_enabled === true,
+        active_unit: billing.active_unit,
+        spl_symbol: billing.spl_symbol,
+        points_symbol: billing.points_symbol,
+        token_balance: billing.token_balance,
+        points_balance: billing.points_balance,
+        llm_backend: billing.llm_backend || resolvePremiumLlmBackend(),
+        gpu_billing_enabled: billing.gpu_billing_enabled === true,
+        free_tokens: billing.free_tokens,
+        free_points: billing.free_points,
           tokens_spent: billing.tokens_spent,
           points_spent: billing.points_spent,
           topup_url: billing.topup_url || null,
@@ -8992,6 +9029,8 @@ ul { margin: 0; padding-left: 18px; }
         free_points: Number(dependent?.billing?.free_points || 0),
         token_balance: Number(dependent?.billing?.token_balance || 0),
         points_balance: Number(dependent?.billing?.points_balance || 0),
+        llm_backend: dependent?.billing?.llm_backend || resolvePremiumLlmBackend(),
+        gpu_billing_enabled: dependent?.billing?.gpu_billing_enabled === true,
         pricing_model: {
           base_tokens: normalizedPremiumBaseCost(),
           per_page_tokens: normalizedPremiumPerPageCost(),
@@ -9206,6 +9245,8 @@ ul { margin: 0; padding-left: 18px; }
       if (state === "Q_PREMIUM_CONFIRM") {
         const billing = ensureBillingState(independent, dependent);
         const pending = billing.pending_quote && typeof billing.pending_quote === "object" ? billing.pending_quote : null;
+        const gpuBilling = billing.gpu_billing_enabled === true;
+        const waiveBilling = pending?.billing_waived === true || !gpuBilling;
         if (!pending) {
           const fallbackState = dependent?.flow?.resume_state || "DONE";
           return await reply({
@@ -9228,6 +9269,16 @@ ul { margin: 0; padding-left: 18px; }
         }
 
         if (decision !== "yes") {
+          if (waiveBilling) {
+            return await reply({
+              ok: true,
+              next_state: "Q_PREMIUM_CONFIRM",
+              prompt:
+                "Premium build request detected. This run does not use GPU LLM resources, so no token charge will be applied.\n" +
+                "Reply yes to continue, or no to cancel.",
+            });
+          }
+
           const quote = buildPremiumQuoteSnapshot(pending, billing);
           const topupUrl = getPremiumActiveTopupUrl(billing);
           return await reply({
@@ -9256,13 +9307,15 @@ ul { margin: 0; padding-left: 18px; }
           });
         }
 
-        const useCheck = canUsePremiumBuilder(independent, dependent);
-        if (!useCheck.ok) {
-          return await reply({
-            ok: true,
-            next_state: "Q_PREMIUM_CONFIRM",
-            prompt: `${useCheck.reason}\n\nReply no to cancel, or top up and then reply yes.`,
-          });
+        if (!waiveBilling) {
+          const useCheck = canUsePremiumBuilder(independent, dependent);
+          if (!useCheck.ok) {
+            return await reply({
+              ok: true,
+              next_state: "Q_PREMIUM_CONFIRM",
+              prompt: `${useCheck.reason}\n\nReply no to cancel, or top up and then reply yes.`,
+            });
+          }
         }
 
         const charge = applyPremiumTokenCharge(independent, dependent, pending.tokens, {
@@ -9270,18 +9323,21 @@ ul { margin: 0; padding-left: 18px; }
           page_count: pending.page_count,
           complexity_units: pending.complexity_units,
           source: "chat_confirmed_quote",
+          waive: waiveBilling,
         });
         if (!charge.ok) {
-          const quote = buildPremiumQuoteSnapshot(pending, billing);
-          const topupUrl = getPremiumActiveTopupUrl(billing);
-          return await reply({
-            ok: true,
-            next_state: "Q_PREMIUM_CONFIRM",
-            prompt:
-              `Insufficient ${quote.charge_symbol}. Needed ${quote.charge_amount}, available ${quote.active_balance}. ` +
-              `Top up and reply yes again.`,
-            topup_url: topupUrl,
-          });
+          if (!waiveBilling) {
+            const quote = buildPremiumQuoteSnapshot(pending, billing);
+            const topupUrl = getPremiumActiveTopupUrl(billing);
+            return await reply({
+              ok: true,
+              next_state: "Q_PREMIUM_CONFIRM",
+              prompt:
+                `Insufficient ${quote.charge_symbol}. Needed ${quote.charge_amount}, available ${quote.active_balance}. ` +
+                `Top up and reply yes again.`,
+              topup_url: topupUrl,
+            });
+          }
         }
 
         billing.premium_enabled = true;
@@ -9302,8 +9358,10 @@ ul { margin: 0; padding-left: 18px; }
           ok: true,
           next_state: resumeState,
           prompt:
-            `Premium mode activated. Charged ${charge.charged_amount} ${charge.unit === "points" ? billing.points_symbol : "tokens"}. ` +
-            `Remaining balance: ${charge.balance} ${charge.unit === "points" ? billing.points_symbol : "tokens"}.\n\n` +
+            (waiveBilling
+              ? "Premium mode activated. No GPU token charge applied for this run.\n\n"
+              : `Premium mode activated. Charged ${charge.charged_amount} ${charge.unit === "points" ? billing.points_symbol : "tokens"}. ` +
+                `Remaining balance: ${charge.balance} ${charge.unit === "points" ? billing.points_symbol : "tokens"}.\n\n`) +
             (compiled
               ? `${compiled.summary}\n\nSend your next premium instruction and I’ll keep processing with token metering.`
               : "Send your premium build instruction and I’ll process it with token metering."),
@@ -9320,17 +9378,30 @@ ul { margin: 0; padding-left: 18px; }
 
       if (isPremiumBuilderRequest(answerText)) {
         const billing = ensureBillingState(independent, dependent);
+        const gpuBilling = billing.gpu_billing_enabled === true;
         const estimate = estimatePremiumTokenCost(answerText);
-        const quote = buildPremiumQuoteSnapshot(estimate, billing);
-        billing.last_quote = { ...quote, request_preview: answerText.slice(0, 280), quoted_at: now() };
         billing.pending_quote = {
           ...estimate,
           request_text: answerText.slice(0, 8000),
           state_to_resume: state,
           quoted_at: now(),
+          billing_waived: !gpuBilling,
         };
         billing.updated_at = now();
 
+        if (!gpuBilling) {
+          return await reply({
+            ok: true,
+            next_state: "Q_PREMIUM_CONFIRM",
+            prompt:
+              `Premium build request detected (~${estimate.page_count} page(s), complexity ${estimate.complexity_units}).\n` +
+              "This run does not use GPU LLM resources, so no token charge will be applied.\n" +
+              "Reply yes to run this premium request, or no to cancel.",
+          });
+        }
+
+        const quote = buildPremiumQuoteSnapshot(estimate, billing);
+        billing.last_quote = { ...quote, request_preview: answerText.slice(0, 280), quoted_at: now() };
         const useCheck = canUsePremiumBuilder(independent, dependent);
         const topupUrl = getPremiumActiveTopupUrl(billing);
         const topupLine = topupUrl ? `\nTop up: ${topupUrl}` : "";

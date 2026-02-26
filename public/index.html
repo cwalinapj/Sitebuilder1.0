@@ -449,10 +449,13 @@
       const freePoints = Number(cfg?.free_points || 0);
       const pointsSymbol = String(cfg?.points_symbol || "PTS");
       const pointsEnabled = cfg?.points_enabled === true;
+      const llmBackend = String(cfg?.llm_backend || "external");
+      const gpuBilling = cfg?.gpu_billing_enabled === true;
       const starterParts = [];
       if (freeTokens > 0) starterParts.push(`Wallet sign-in gives you ${freeTokens} ${spl} starter tokens.`);
       if (pointsEnabled && freePoints > 0) starterParts.push(`Name sign-in gets ${freePoints} ${pointsSymbol} starter points.`);
       if (!starterParts.length) starterParts.push("Starter tokens are not enabled yet.");
+      starterParts.push(`GPU billing: ${gpuBilling ? "on" : "off"} (${llmBackend}).`);
       billingStarter.textContent = starterParts.join(" ");
       billingPricing.textContent = formatPricingModel(cfg?.pricing_model);
       billingPanel.style.display = "block";
