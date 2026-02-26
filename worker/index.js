@@ -1204,6 +1204,11 @@ export default {
       return "external";
     }
 
+    function resolvePremiumGpuEndpoint() {
+      const raw = String(env.PREMIUM_LLM_GPU_URL || env.LOCAL_LLM_URL || "").trim();
+      return raw || null;
+    }
+
     function premiumBillingUsesGpu(backend) {
       return String(backend || "").toLowerCase() === "gpu";
     }
@@ -1290,6 +1295,7 @@ export default {
       billing.free_points = normalizedPremiumFreePoints();
       billing.premium_enabled = billing.premium_enabled === true;
       billing.llm_backend = resolvePremiumLlmBackend();
+      billing.gpu_endpoint = resolvePremiumGpuEndpoint();
       billing.gpu_billing_enabled = premiumBillingUsesGpu(billing.llm_backend);
       billing.wallet_required = premiumWalletRequired();
       billing.wallet_verified = Boolean(hasWallet);
@@ -5887,6 +5893,7 @@ ul { margin: 0; padding-left: 18px; }
         premium_ad_rewards_enabled: premiumAdRewardsEnabled(),
         premium_llm_backend: resolvePremiumLlmBackend(),
         premium_gpu_billing: premiumBillingUsesGpu(resolvePremiumLlmBackend()),
+        premium_gpu_endpoint: resolvePremiumGpuEndpoint(),
       });
     }
 
@@ -5912,6 +5919,7 @@ ul { margin: 0; padding-left: 18px; }
         free_points: normalizedPremiumFreePoints(),
         llm_backend: resolvePremiumLlmBackend(),
         gpu_billing_enabled: premiumBillingUsesGpu(resolvePremiumLlmBackend()),
+        gpu_endpoint: resolvePremiumGpuEndpoint(),
         pricing_model: {
           base_tokens: normalizedPremiumBaseCost(),
           per_page_tokens: normalizedPremiumPerPageCost(),
@@ -5958,6 +5966,7 @@ ul { margin: 0; padding-left: 18px; }
         points_balance: billing.points_balance,
         llm_backend: billing.llm_backend || resolvePremiumLlmBackend(),
         gpu_billing_enabled: billing.gpu_billing_enabled === true,
+        gpu_endpoint: billing.gpu_endpoint || resolvePremiumGpuEndpoint(),
         free_tokens: billing.free_tokens,
         free_points: billing.free_points,
           tokens_spent: billing.tokens_spent,
@@ -9031,6 +9040,7 @@ ul { margin: 0; padding-left: 18px; }
         points_balance: Number(dependent?.billing?.points_balance || 0),
         llm_backend: dependent?.billing?.llm_backend || resolvePremiumLlmBackend(),
         gpu_billing_enabled: dependent?.billing?.gpu_billing_enabled === true,
+        gpu_endpoint: dependent?.billing?.gpu_endpoint || resolvePremiumGpuEndpoint(),
         pricing_model: {
           base_tokens: normalizedPremiumBaseCost(),
           per_page_tokens: normalizedPremiumPerPageCost(),
