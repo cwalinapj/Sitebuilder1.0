@@ -2780,6 +2780,23 @@ ul { margin: 0; padding-left: 18px; }
       return n;
     }
 
+    function parseMultipleDigitChoices(text, maxChoice = 9) {
+      const t = String(text || "");
+      if (!t) return [];
+      const re = /(^|[^0-9])([1-9])([^0-9]|$)/g;
+      const seen = new Set();
+      const choices = [];
+      let m;
+      while ((m = re.exec(t)) !== null) {
+        const n = Number(m[2]);
+        if (!Number.isFinite(n) || n < 1 || n > maxChoice) continue;
+        if (seen.has(n)) continue;
+        seen.add(n);
+        choices.push(n);
+      }
+      return choices;
+    }
+
     function parseAuditEmailPreferences(text) {
       const t = String(text || "").toLowerCase().trim();
       if (!t) return { decision: "unknown", report: null, reminder: null };
@@ -8684,6 +8701,7 @@ ul { margin: 0; padding-left: 18px; }
         business: {
           description_raw: null,
           type_final: null,
+          type_secondary: [],
           own_site_url: null,
           own_site_confirmed: null,
           site_platform: null,
@@ -8739,7 +8757,7 @@ ul { margin: 0; padding-left: 18px; }
       };
 
       const dependent = {
-        draft: { type_guess: null, type_candidates: [], type_source: null },
+        draft: { type_guess: null, type_secondary: [], type_candidates: [], type_source: null },
         flow: { expected_state: "Q1_DESCRIBE", audit_requested: false },
         name_proposals: [],
         scan: {
@@ -9498,10 +9516,21 @@ ul { margin: 0; padding-left: 18px; }
       if (state === "Q1_CHOOSE_TYPE") {
         const candidates = Array.isArray(dependent?.draft?.type_candidates) ? dependent.draft.type_candidates : [];
         let picked = null;
+        let pickedSecondary = [];
         const choice = parseSingleDigitChoice(answerText);
         if (choice) {
           const idx = choice - 1;
           if (candidates[idx]) picked = candidates[idx];
+        }
+        if (!picked) {
+          const multi = parseMultipleDigitChoices(answerText, candidates.length);
+          if (multi.length) {
+            const labels = multi.map((n) => candidates[n - 1]).filter(Boolean);
+            if (labels.length) {
+              picked = labels[0];
+              pickedSecondary = labels.slice(1);
+            }
+          }
         }
         if (!picked) {
           const normalizedAnswer = normalizeBusinessTypeLabel(answerText);
@@ -9525,8 +9554,21 @@ ul { margin: 0; padding-left: 18px; }
         }
 
         picked = canonicalizeBusinessTypeLabel(picked);
+        pickedSecondary = (pickedSecondary || [])
+          .map((x) => canonicalizeBusinessTypeLabel(x))
+          .filter(Boolean)
+          .filter((x) => x !== picked);
 
         dependent.draft.type_guess = picked;
+        dependent.draft.type_secondary = pickedSecondary;
+        if (pickedSecondary.length) {
+          const secondaryLabel = pickedSecondary.join('", "');
+          return await reply({
+            ok: true,
+            next_state: "Q1_CONFIRM_TYPE",
+            prompt: `Just to confirm before I save this: I’m going to label your primary business type as "${picked}" and also note "${secondaryLabel}". Is that correct?`,
+          });
+        }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
@@ -9539,6 +9581,7 @@ ul { margin: 0; padding-left: 18px; }
         if (correctedType) {
           dependent.draft.type_guess = correctedType;
           dependent.draft.type_source = "manual";
+          dependent.draft.type_secondary = [];
           return await reply({
             ok: true,
             next_state: "Q1_CONFIRM_TYPE",
@@ -9564,6 +9607,9 @@ ul { margin: 0; padding-left: 18px; }
         }
 
         independent.business.type_final = canonicalizeBusinessTypeLabel(dependent.draft.type_guess);
+        independent.business.type_secondary = Array.isArray(dependent?.draft?.type_secondary)
+          ? dependent.draft.type_secondary
+          : [];
         await rememberBusinessType(independent.business.description_raw, independent.business.type_final, dependent?.draft?.type_source || "user_confirmed");
 
         return await reply({
@@ -9590,6 +9636,7 @@ ul { margin: 0; padding-left: 18px; }
         if (!t) return json({ ok: false, error: "Please provide a business type label." }, 400);
         dependent.draft.type_guess = t;
         dependent.draft.type_source = "manual";
+        dependent.draft.type_secondary = [];
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
