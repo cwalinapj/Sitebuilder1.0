@@ -451,7 +451,16 @@
       const pointsEnabled = cfg?.points_enabled === true;
       const llmBackend = String(cfg?.llm_backend || "external");
       const gpuBilling = cfg?.gpu_billing_enabled === true;
-      const gpuEndpoint = String(cfg?.gpu_endpoint || "").trim();
+      const gpuEndpointRaw = String(cfg?.gpu_endpoint || "").trim();
+      let gpuEndpoint = "";
+      if (gpuEndpointRaw) {
+        try {
+          const u = new URL(gpuEndpointRaw);
+          gpuEndpoint = u.hostname || gpuEndpointRaw;
+        } catch {
+          gpuEndpoint = gpuEndpointRaw.split("/")[0] || gpuEndpointRaw;
+        }
+      }
       const starterParts = [];
       if (freeTokens > 0) starterParts.push(`Wallet sign-in gives you ${freeTokens} ${spl} starter tokens.`);
       if (pointsEnabled && freePoints > 0) starterParts.push(`Name sign-in gets ${freePoints} ${pointsSymbol} starter points.`);
