@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sitebuilder Mint Admin</title>
+  <style>
+    :root {
+      --bg: #f5f8fb;
+      --panel-bg: #ffffff;
+      --panel-border: #dbe4ef;
+      --text: #162434;
+      --muted: #5e748d;
+      --accent: #1276d1;
+      --accent-ink: #ffffff;
+    }
+    body {
+      font-family: "Times New Roman", Georgia, serif;
+      max-width: 980px;
+      margin: 24px auto;
+      padding: 0 16px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, #ddeeff 0%, rgba(221,238,255,0) 35%),
+        radial-gradient(circle at bottom left, #dcf6e8 0%, rgba(220,246,232,0) 35%),
+        var(--bg);
+    }
+    h1 {
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 24px;
+      color: #123050;
+      margin-bottom: 12px;
+    }
+    .panel {
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--panel-bg);
+      box-shadow: 0 12px 30px rgba(21, 44, 75, 0.08);
+      margin-bottom: 16px;
+    }
+    label {
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display: block;
+    }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #ccd9e8;
+      margin-bottom: 12px;
+    }
+    button {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid #1e446b;
+      background: #173b62;
+      color: #fff;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    pre {
+      background: #f2f6fb;
+      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid #d5e1ef;
+      overflow: auto;
+      font-size: 12px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Mint Admin</h1>
+
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label for="token">Admin Token</label>
+        <input id="token" type="password" placeholder="ADMIN_DASH_TOKEN"/>
+      </div>
+      <div>
+        <label for="session">Session ID</label>
+        <input id="session" placeholder="ses_..."/>
+      </div>
+    </div>
+    <button id="fetchBtn">Fetch Mint Status</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="panel">
+    <label>Result</label>
+    <pre id="result">No data yet.</pre>
+  </div>
+
+  <script>
+    const PRIMARY_WORKER_BASE = "https://api.cardetailingreno.com";
+    const FALLBACK_WORKER_BASE = "https://sitebuilder-agent.96psxbzqk2.workers.dev";
+
+    const tokenInput = document.getElementById("token");
+    const sessionInput = document.getElementById("session");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const fetchBtn = document.getElementById("fetchBtn");
+
+    const params = new URLSearchParams(window.location.search);
+    const sessionParam = params.get("session_id");
+    if (sessionParam) sessionInput.value = sessionParam;
+
+    async function workerFetch(path, options = {}) {
+      const primaryUrl = `${PRIMARY_WORKER_BASE}${path}`;
+      let primaryResponse = null;
+      try {
+        primaryResponse = await fetch(primaryUrl, options);
+      } catch {}
+
+      const shouldFallback =
+        !primaryResponse ||
+        [520, 521, 522, 523, 525, 526, 530].includes(primaryResponse.status);
+
+      if (!shouldFallback) return primaryResponse;
+      return fetch(`${FALLBACK_WORKER_BASE}${path}`, options);
+    }
+
+    async function fetchStatus() {
+      const token = tokenInput.value.trim();
+      const sessionId = sessionInput.value.trim();
+      if (!token || !sessionId) {
+        statusEl.textContent = "Token and session id are required.";
+        return;
+      }
+      statusEl.textContent = "Loading...";
+      fetchBtn.disabled = true;
+      resultEl.textContent = "";
+      try {
+        const r = await workerFetch(`/admin/mints?session_id=${encodeURIComponent(sessionId)}`, {
+          method: "GET",
+          headers: { "x-admin-token": token },
+        });
+        const data = await r.json();
+        if (!r.ok || !data.ok) {
+          statusEl.textContent = data?.error || "Request failed.";
+          resultEl.textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+        statusEl.textContent = "OK";
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        statusEl.textContent = String(err?.message || err);
+      } finally {
+        fetchBtn.disabled = false;
+      }
+    }
+
+    fetchBtn.addEventListener("click", fetchStatus);
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "sitebuilder-polygon-sbt-webhook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "viem": "^2.39.0"
+  }
+}

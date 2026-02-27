@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Site Builder</title>
   <style>
+    @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
     :root {
       --bg: #f5f8fb;
       --panel-bg: #ffffff;
@@ -19,7 +20,7 @@
       --btn-border: #ccd9e8;
     }
     body {
-      font-family: "Times New Roman", Georgia, serif;
+      font-family: "Plus Jakarta Sans", "Avenir Next", "Segoe UI", sans-serif;
       max-width: 920px;
       margin: 24px auto;
       padding: 0 12px;
@@ -29,69 +30,70 @@
         radial-gradient(circle at bottom left, #dcf6e8 0%, rgba(220,246,232,0) 35%),
         var(--bg);
     }
-    .pageTitle {
-      text-align: center;
-      font-size: 28px;
-      letter-spacing: 0.12em;
-      font-weight: 700;
-      text-transform: uppercase;
-      margin: 8px 0 16px;
-      color: #123050;
-    }
     .topRibbon {
       display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      grid-template-columns: auto 1fr;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
       margin: 6px 0 16px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #d5e2ef;
+      border-radius: 16px;
+      padding: 10px 12px;
+      box-shadow: 0 18px 34px rgba(18, 44, 75, 0.08);
     }
-    .ribbonLeft {
+    .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      justify-content: flex-start;
+      gap: 12px;
+    }
+    .brandLogo {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid #bfd2e6;
+      background: linear-gradient(145deg, #f9fcff, #e5f0fb);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 8px 18px rgba(25, 67, 111, 0.18);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .brandLogo svg {
+      width: 24px;
+      height: 24px;
+      display: block;
+    }
+    .brandText {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+    .brandName {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #153657;
+      text-transform: uppercase;
+    }
+    .brandSub {
+      font-size: 11px;
+      color: #5a7491;
+      letter-spacing: 0.02em;
+      margin-top: 2px;
     }
     .ribbonRight {
       display: flex;
       align-items: center;
-      gap: 8px;
       justify-content: flex-end;
+      gap: 8px;
       flex-wrap: wrap;
     }
-    .jackpotCard {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border-radius: 12px;
-      border: 1px solid #b7c7db;
-      background: linear-gradient(180deg, #ffffff, #eef4fb);
-      padding: 8px 10px;
-      box-shadow: 0 8px 20px rgba(17, 49, 86, 0.12);
-    }
-    .jackpotLabel {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: #1d4f81;
-      font-weight: 700;
-    }
-    .jackpotDigits {
-      font-family: "Courier New", Courier, monospace;
-      font-size: 18px;
-      font-weight: 700;
-      background: #0f2338;
-      color: #e7f2ff;
-      padding: 6px 10px;
-      border-radius: 8px;
-      letter-spacing: 0.2em;
-      border: 1px solid #2b4d6a;
-      min-width: 120px;
-      text-align: center;
-    }
-    .jackpotHint {
+    .ribbonCaption {
       font-size: 11px;
-      color: #4d6a85;
-      max-width: 220px;
+      color: #617f9d;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      margin-right: 4px;
       line-height: 1.3;
     }
     .frameworkBadge {
@@ -115,15 +117,19 @@
     @media (max-width: 720px) {
       .topRibbon {
         grid-template-columns: 1fr;
-        justify-items: center;
+        gap: 10px;
       }
-      .ribbonLeft,
       .ribbonRight {
         justify-content: center;
       }
-      .jackpotHint {
-        max-width: none;
+      .brand {
+        justify-content: center;
+      }
+      .brandSub {
         text-align: center;
+      }
+      .ribbonCaption {
+        margin-right: 0;
       }
     }
     #chat {
@@ -385,6 +391,49 @@
       flex-wrap: wrap;
       gap: 8px;
     }
+    .billingToggle {
+      background: none;
+      border: none;
+      color: #0e5ea8;
+      cursor: pointer;
+      padding: 0;
+      font-size: 12px;
+      text-decoration: underline;
+    }
+    .billingDetails {
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: #eef5fb;
+      border-radius: 10px;
+      border: 1px solid #d4e1ef;
+      display: none;
+    }
+    .billingDetails ul {
+      margin: 6px 0 0 16px;
+      padding: 0;
+    }
+    .trustStrip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .trustChip {
+      border: 1px solid #c8d7e8;
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #fff;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .privacyBlock {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
     .billingBtn {
       display: inline-flex;
       align-items: center;
@@ -408,19 +457,21 @@
 </head>
 <body>
   <div class="topRibbon">
-    <div class="ribbonLeft">
-      <div class="jackpotCard">
-        <div>
-          <div class="jackpotLabel">Builder Jackpot</div>
-          <div class="jackpotDigits" id="jackpotDigits">000000</div>
-        </div>
+    <div class="brand">
+      <div class="brandLogo" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M14 19.5C14 16.5 16.5 14 19.5 14H44.5C47.5 14 50 16.5 50 19.5V44.5C50 47.5 47.5 50 44.5 50H19.5C16.5 50 14 47.5 14 44.5V19.5Z" fill="#173B62"/>
+          <path d="M22 24H42V30H28V34H40V40H28V44H22V24Z" fill="#EFF6FD"/>
+          <path d="M43 24H49V44H43V24Z" fill="#7FB0E1"/>
+        </svg>
       </div>
-      <div class="jackpotHint">
-        Authenticate and build a one‑page site to enter the early‑adopter reward pool.
+      <div class="brandText">
+        <div class="brandName">Site Builder</div>
+        <div class="brandSub">Build-ready websites with guided AI workflow</div>
       </div>
     </div>
-    <div class="pageTitle">Site Builder</div>
     <div class="ribbonRight">
+      <div class="ribbonCaption">Supported frameworks</div>
       <div class="frameworkBadge">
         <img src="https://www.google.com/s2/favicons?sz=64&domain_url=nextjs.org" alt="Next.js"/>
         Next.js
@@ -440,8 +491,8 @@
     </div>
   </div>
   <div id="startPanel">
-    <div class="startTitle">Choose how you want to sign in</div>
-    <div class="startSub">Wallet sign-in is one click. No copy/paste of wallet addresses.</div>
+    <div class="startTitle">Sign in with wallet (no transaction)</div>
+    <div class="startSub">This signs a message to prove ownership. It does not move funds.</div>
     <div class="startRow">
       <button class="startBtn primary" id="startNameBtn" type="button">
         <span class="startIconWrap" aria-hidden="true">N</span>
@@ -464,9 +515,15 @@
         <span class="startLabel">Phantom</span>
       </button>
     </div>
-    <div class="startHint" id="startHint">Wallet sign-in never asks you to copy/paste a public address.</div>
+    <div class="startHint" id="startHint">No approvals. No gas. Disconnect anytime. Transactions are only for top-ups.</div>
+    <div class="trustStrip" aria-label="Wallet trust indicators">
+      <div class="trustChip">Never share seed phrase</div>
+      <div class="trustChip">No approvals</div>
+      <div class="trustChip">No gas</div>
+      <div class="trustChip">Disconnect anytime</div>
+    </div>
     <div id="billingPanel" style="display:none;">
-      <div class="billingTitle">Starter tokens and pricing</div>
+      <div class="billingTitle">Balances and pricing</div>
       <div class="billingLine" id="billingStarter">Loading starter balance...</div>
       <div class="billingLine" id="billingPricing"></div>
       <div class="billingLine" id="billingBalance" style="display:none;"></div>
@@ -486,6 +543,9 @@
     <input id="input" placeholder="Type here..." autocomplete="off" disabled/>
     <button type="submit" id="sendBtn" disabled>Send</button>
   </form>
+  <div class="privacyBlock">
+    We store wallet address, build history (stack, palette, copy), and point totals. We never store seed phrases or private keys.
+  </div>
   <div id="turnstileMount" style="display:none;"></div>
 
   <script>
@@ -531,30 +591,8 @@
     let turnstileWidgetId = null;
     let turnstileResolve = null;
     let turnstileReject = null;
-    const jackpotDigits = document.getElementById("jackpotDigits");
-    let jackpotBase = 120000;
-    let jackpotTimer = null;
-    let jackpotBump = 0;
-
-    function formatJackpot(n) {
-      const v = Math.max(0, Math.floor(Number(n) || 0));
-      return String(v).padStart(6, "0");
-    }
-
-    function startJackpotTicker() {
-      if (!jackpotDigits) return;
-      if (jackpotTimer) clearInterval(jackpotTimer);
-      jackpotTimer = setInterval(() => {
-        jackpotBump += 3 + Math.floor(Math.random() * 5);
-        jackpotDigits.textContent = formatJackpot(jackpotBase + jackpotBump);
-      }, 1400);
-      jackpotDigits.textContent = formatJackpot(jackpotBase);
-    }
-
-    function bumpJackpotOnAuth() {
-      if (!jackpotDigits) return;
-      jackpotBump += 250 + Math.floor(Math.random() * 300);
-      jackpotDigits.textContent = formatJackpot(jackpotBase + jackpotBump);
+    function tollTokenLabel() {
+      return "Toll Tokens";
     }
 
     async function workerFetch(path, options = {}) {
@@ -572,13 +610,38 @@
       return fetch(`${FALLBACK_WORKER_BASE}${path}`, options);
     }
 
-    function formatPricingModel(model) {
+    function formatPricingSummary(model, symbol = "Toll Tokens") {
       if (!model) return "";
       const base = Number(model.base_tokens || 0);
       const perPage = Number(model.per_page_tokens || 0);
       const perWords = Number(model.per_30_words_tokens || 0);
       const perComplex = Number(model.per_complexity_unit_tokens || 0);
-      return `Pricing is based on estimated token usage per request. Estimated formula: ${base} base + ${perPage}/page + ${perWords} per 30 words + ${perComplex} per complexity unit.`;
+      const est = Math.max(1, Math.round(base + perPage + (perWords * 10) + perComplex));
+      return `Estimated cost: ~${est} ${symbol}. Includes 1 page, ~300 words, standard complexity.`;
+    }
+
+    function formatPricingDetails(model, symbol = "Toll Tokens") {
+      if (!model) return "";
+      const base = Number(model.base_tokens || 0);
+      const perPage = Number(model.per_page_tokens || 0);
+      const perWords = Number(model.per_30_words_tokens || 0);
+      const perComplex = Number(model.per_complexity_unit_tokens || 0);
+      const ex1 = Math.max(1, Math.round(base + perPage + perComplex));
+      const ex2 = Math.max(1, Math.round(base + (2 * perPage) + (perWords * 12) + (2 * perComplex)));
+      const ex3 = Math.max(1, Math.round(base + (3 * perPage) + (perWords * 20) + (3 * perComplex)));
+      return {
+        breakdown: [
+          `Base ${base}`,
+          `${perPage}/page`,
+          `${perWords} per 30 words`,
+          `${perComplex} per complexity unit`,
+        ],
+        examples: [
+          `Simple landing page: ${ex1}-${ex1 + perPage} ${symbol}`,
+          `With sections + FAQ: ${ex2}-${ex2 + perPage} ${symbol}`,
+          `With lots of copy + components: ${ex3}-${ex3 + perPage} ${symbol}`,
+        ],
+      };
     }
 
     function setBillingActions(urls = []) {
@@ -596,14 +659,14 @@
         a.href = url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.textContent = idx === 0 ? "Top up tokens" : "Buy points";
+        a.textContent = idx === 0 ? "Top up Toll Tokens" : "Buy PTS points";
         billingActions.appendChild(a);
       });
     }
 
     function renderBillingConfig(cfg) {
       if (!billingPanel || !billingStarter || !billingPricing) return;
-      const spl = String(cfg?.spl_symbol || "SPL");
+      const spl = tollTokenLabel();
       const freeTokens = Number(cfg?.free_tokens || 0);
       const freePoints = Number(cfg?.free_points || 0);
       const pointsSymbol = String(cfg?.points_symbol || "PTS");
@@ -621,26 +684,51 @@
         }
       }
       const starterParts = [];
-      if (freeTokens > 0) starterParts.push(`Wallet sign-in gives you ${freeTokens} ${spl} starter tokens.`);
-      if (pointsEnabled && freePoints > 0) starterParts.push(`Name sign-in gets ${freePoints} ${pointsSymbol} starter points.`);
-      if (!starterParts.length) starterParts.push("Starter tokens are not enabled yet.");
-      starterParts.push(`GPU billing: ${gpuBilling ? "on" : "off"} (${llmBackend}).`);
-      if (gpuEndpoint) starterParts.push(`GPU endpoint: ${gpuEndpoint}.`);
+      starterParts.push(`On-chain ${spl}: ${freeTokens} (wallet balance).`);
+      if (pointsEnabled) starterParts.push(`${pointsSymbol} Points: ${freePoints} (internal).`);
+      starterParts.push(`Toll Tokens are on-chain utility. PTS is internal and non-transferable.`);
+      if (gpuEndpoint) starterParts.push(`GPU backend: ${gpuBilling ? "on" : "off"} (${llmBackend}).`);
       billingStarter.textContent = starterParts.join(" ");
-      billingPricing.textContent = formatPricingModel(cfg?.pricing_model);
+
+      const summary = formatPricingSummary(cfg?.pricing_model, spl);
+      const details = formatPricingDetails(cfg?.pricing_model, spl);
+      const detailLines = details
+        ? `${details.breakdown.map((l) => `- ${l}`).join("\n")}\n\nExamples:\n${details.examples.map((l) => `- ${l}`).join("\n")}`
+        : "";
+      billingPricing.innerHTML = "";
+      const summaryEl = document.createElement("div");
+      summaryEl.textContent = summary;
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "billingToggle";
+      toggleBtn.textContent = "Show pricing details ▾";
+      const detailEl = document.createElement("div");
+      detailEl.className = "billingDetails";
+      const detailPre = document.createElement("pre");
+      detailPre.textContent = detailLines.trim();
+      detailEl.appendChild(detailPre);
+      toggleBtn.addEventListener("click", () => {
+        const open = detailEl.style.display === "block";
+        detailEl.style.display = open ? "none" : "block";
+        toggleBtn.textContent = open ? "Show pricing details ▾" : "Hide pricing details ▴";
+      });
+      billingPricing.appendChild(summaryEl);
+      billingPricing.appendChild(toggleBtn);
+      billingPricing.appendChild(detailEl);
       billingPanel.style.display = "block";
       setBillingActions([cfg?.topup_url, cfg?.points_topup_url]);
     }
 
     function renderBillingStatus(status) {
       if (!billingBalance) return;
-      const spl = String(status?.spl_symbol || "SPL");
+      const spl = tollTokenLabel();
       const pointsSymbol = String(status?.points_symbol || "PTS");
       const tokenBal = Number(status?.token_balance || 0);
       const pointsBal = Number(status?.points_balance || 0);
       const parts = [];
-      parts.push(`Current balance: ${tokenBal} ${spl} tokens.`);
-      if (status?.points_enabled) parts.push(`${pointsBal} ${pointsSymbol} points.`);
+      parts.push(`On-chain ${spl}: ${tokenBal} (wallet balance).`);
+      if (status?.points_enabled) parts.push(`${pointsBal} ${pointsSymbol} (internal).`);
+      parts.push(`Toll Tokens are on-chain utility. PTS is internal and non-transferable.`);
       billingBalance.textContent = parts.join(" ");
       billingBalance.style.display = "block";
       setBillingActions([status?.topup_url, status?.points_topup_url]);
@@ -992,6 +1080,15 @@
           return;
         }
         addMsg("ai", `On-chain claim recorded. Tx: ${confirmData.txid}`);
+        if (confirmData.reward) {
+          if (confirmData.reward.ok && confirmData.reward.txid) {
+            addMsg("ai", `Reward mint submitted. Tx: ${confirmData.reward.txid}`);
+          } else if (confirmData.reward.skipped) {
+            addMsg("ai", "Reward mint skipped (not configured yet).");
+          } else if (confirmData.reward.error) {
+            addMsg("ai", `Reward mint failed: ${confirmData.reward.error}`);
+          }
+        }
       } catch (error) {
         addMsg("ai", String(error?.message || "On-chain claim failed."));
       }
@@ -1351,20 +1448,22 @@
       sessionId = data.session_id;
       state = data.next_state;
       if (startPanel) startPanel.style.display = "none";
-      bumpJackpotOnAuth();
       input.disabled = false;
       sendBtn.disabled = false;
       addMsg("ai", data.prompt);
       if (data.billing) {
         renderBillingConfig(data.billing);
         renderBillingStatus(data.billing);
+        const spl = tollTokenLabel();
+        const pts = data.billing.points_symbol || "PTS";
         addMsg(
           "ai",
-          `Starter balance: ${Number(data.billing.token_balance || 0)} ${data.billing.spl_symbol || "SPL"} tokens` +
-            (data.billing.points_enabled ? ` and ${Number(data.billing.points_balance || 0)} ${data.billing.points_symbol || "PTS"} points.` : ".")
+          `On-chain ${spl}: ${Number(data.billing.token_balance || 0)} (wallet balance). ` +
+            `${data.billing.points_enabled ? `${Number(data.billing.points_balance || 0)} ${pts} (internal). ` : ""}` +
+            "Toll Tokens are on-chain utility. PTS is internal and non-transferable."
         );
         if (data.billing.pricing_model) {
-          addMsg("ai", formatPricingModel(data.billing.pricing_model));
+          addMsg("ai", formatPricingSummary(data.billing.pricing_model, spl));
         }
         if (walletSession?.protocol === "solana" && !data.billing.onchain_claimed && !onchainClaimShown) {
           onchainClaimShown = true;
@@ -1572,7 +1671,6 @@
     });
 
     loadBillingConfig();
-    startJackpotTicker();
   </script>
 </body>
 </html>

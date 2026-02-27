@@ -1,4 +1,5 @@
-import { verifyMessage } from "viem";
+import { verifyMessage, createPublicClient, createWalletClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 
@@ -85,6 +86,15 @@ const REFERENCE_BLOCKED_HOST_KEYWORDS = [
   "streaming",
   "movies",
   "tv",
+];
+const POLYGON_SBT_ABI = [
+  {
+    type: "function",
+    name: "mint",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "to", type: "address" }],
+    outputs: [{ name: "tokenId", type: "uint256" }],
+  },
 ];
 
 function consumeStartRateLimit(ip, ts) {
@@ -478,12 +488,57 @@ export default {
     }
 
     async function logEvent(db, session_id, turn_id, speaker, state, text) {
+      const eventTs = now();
+      const event = {
+        session_id,
+        turn_id: Number(turn_id || 0),
+        speaker: String(speaker || "").trim() || "assistant",
+        state: state || null,
+        text: String(text || ""),
+        ts: eventTs,
+      };
       await db
         .prepare(
           "INSERT OR REPLACE INTO convo_events(session_id, turn_id, speaker, state, text, ts) VALUES (?,?,?,?,?,?)"
         )
-        .bind(session_id, turn_id, speaker, state || null, String(text || ""), now())
+        .bind(event.session_id, event.turn_id, event.speaker, event.state, event.text, event.ts)
         .run();
+      return event;
+    }
+
+    function toUtcDateParts(ts) {
+      const d = new Date(Number(ts) || Date.now());
+      const y = String(d.getUTCFullYear());
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      return { y, m, day };
+    }
+
+    async function archiveTurnToR2(event, session_created_at) {
+      const bucket = convoBucket();
+      if (!bucket || !event || !event.session_id) return null;
+      const ts = Number(event.ts) || now();
+      const { y, m, day } = toUtcDateParts(ts);
+      const turn = String(Math.max(0, Number(event.turn_id || 0))).padStart(4, "0");
+      const speaker = String(event.speaker || "assistant").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "assistant";
+      const key =
+        `conversations/by-date/${y}/${m}/${day}/` +
+        `${event.session_id}/${ts}_${turn}_${speaker}.json`;
+      const payload = {
+        ...event,
+        session_created_at: Number(session_created_at || 0) || null,
+        archived_at: now(),
+        ts_iso_utc: new Date(ts).toISOString(),
+      };
+      try {
+        await bucket.put(key, JSON.stringify(payload, null, 2), {
+          httpMetadata: { contentType: "application/json" },
+        });
+      } catch {
+        // Keep chat flow resilient if archival write fails.
+        return null;
+      }
+      return key;
     }
 
     async function flushSessionToR2(db, session_id, session_created_at) {
@@ -1089,7 +1144,10 @@ export default {
     }
 
     function premiumSplTokenSymbol() {
-      return String(env.PREMIUM_SPL_SYMBOL || "TOLLSPL").trim() || "TOLLSPL";
+      const raw = String(env.PREMIUM_SPL_SYMBOL || "").trim();
+      if (!raw) return "Toll Tokens";
+      if (/^tollspl$/i.test(raw)) return "Toll Tokens";
+      return raw;
     }
 
     function premiumTopupUrl() {
@@ -1220,6 +1278,69 @@ export default {
       return raw || "mainnet-beta";
     }
 
+    function resolvePolygonRpcUrl() {
+      const raw = String(env.POLYGON_RPC_URL || "").trim();
+      return raw || "https://rpc-amoy.polygon.technology";
+    }
+
+    function resolvePolygonChainId() {
+      const n = Number(env.POLYGON_CHAIN_ID);
+      if (Number.isFinite(n) && n > 0) return Math.round(n);
+      return 80002;
+    }
+
+    function polygonSbtEnabled() {
+      const raw = String(env.POLYGON_SBT_ENABLED || "").trim().toLowerCase();
+      if (!raw) return false;
+      return !["0", "false", "off", "no"].includes(raw);
+    }
+
+    function polygonSbtContract() {
+      return String(env.POLYGON_SBT_CONTRACT || "").trim();
+    }
+
+    function polygonSbtPrivateKey() {
+      return String(env.POLYGON_SBT_MINTER_KEY || env.POLYGON_SBT_PRIVATE_KEY || "").trim();
+    }
+
+    function polygonSbtWebhookUrl() {
+      return String(env.POLYGON_SBT_WEBHOOK_URL || "").trim() || null;
+    }
+
+    function polygonSbtWebhookSecret() {
+      return String(env.POLYGON_SBT_WEBHOOK_SECRET || "").trim() || null;
+    }
+
+    function solanaSbtWebhookUrl() {
+      return String(env.SOLANA_SBT_WEBHOOK_URL || "").trim() || null;
+    }
+
+    function solanaSbtWebhookSecret() {
+      return String(env.SOLANA_SBT_WEBHOOK_SECRET || "").trim() || null;
+    }
+
+    function normalizePrivateKey(rawKey) {
+      const k = String(rawKey || "").trim();
+      if (!k) return "";
+      return k.startsWith("0x") ? k : `0x${k}`;
+    }
+
+    function isEvmAddress(addr) {
+      return /^(0x)?[a-fA-F0-9]{40}$/.test(String(addr || "").trim());
+    }
+
+    function requireAdminToken(request, url) {
+      const required = String(env.ADMIN_DASH_TOKEN || "").trim();
+      if (!required) {
+        return { ok: false, status: 403, error: "Admin token not configured." };
+      }
+      const token = String(request.headers.get("x-admin-token") || url.searchParams.get("token") || "").trim();
+      if (!token || token !== required) {
+        return { ok: false, status: 401, error: "Invalid admin token." };
+      }
+      return { ok: true };
+    }
+
     async function solanaRpcCall(rpcUrl, method, params = []) {
       const r = await fetch(rpcUrl, {
         method: "POST",
@@ -1275,6 +1396,130 @@ export default {
         return { ok: false, error: "Memo mismatch." };
       }
       return { ok: true, memo: memoFound };
+    }
+
+    async function mintPolygonSbt(toAddress) {
+      if (!polygonSbtEnabled()) return { ok: false, skipped: true, error: "polygon_sbt_disabled" };
+      const webhookUrl = polygonSbtWebhookUrl();
+      if (webhookUrl) {
+        const body = JSON.stringify({ wallet_address: toAddress });
+        const headers = { "content-type": "application/json" };
+        const secret = polygonSbtWebhookSecret();
+        if (secret) {
+          const ts = String(now());
+          headers["x-sitebuilder-timestamp"] = ts;
+          headers["x-sitebuilder-signature"] = await hmacSha256Hex(secret, `${ts}.${body}`);
+        }
+        const r = await fetch(webhookUrl, { method: "POST", headers, body });
+        const data = await r.json().catch(() => null);
+        if (!r.ok || !data || data.ok === false) {
+          return { ok: false, error: data?.error || `polygon_sbt_webhook_failed:${r.status}` };
+        }
+        return { ok: true, txid: data.txid || null, data };
+      }
+
+      const contractAddress = polygonSbtContract();
+      const privateKey = normalizePrivateKey(polygonSbtPrivateKey());
+      if (!contractAddress || !privateKey) {
+        return { ok: false, skipped: true, error: "polygon_sbt_missing_config" };
+      }
+      if (!isEvmAddress(toAddress)) {
+        return { ok: false, error: "invalid_evm_address" };
+      }
+
+      const chainId = resolvePolygonChainId();
+      const rpcUrl = resolvePolygonRpcUrl();
+      const chain = {
+        id: chainId,
+        name: "Polygon Amoy",
+        network: "amoy",
+        nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+        rpcUrls: { default: { http: [rpcUrl] } },
+      };
+      const account = privateKeyToAccount(privateKey);
+      const transport = http(rpcUrl);
+      const walletClient = createWalletClient({ account, chain, transport });
+      const publicClient = createPublicClient({ chain, transport });
+      const hash = await walletClient.writeContract({
+        address: contractAddress,
+        abi: POLYGON_SBT_ABI,
+        functionName: "mint",
+        args: [toAddress],
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return { ok: true, txid: hash, receipt };
+    }
+
+    async function mintSolanaSbtViaWebhook(payload) {
+      const url = solanaSbtWebhookUrl();
+      if (!url) return { ok: false, skipped: true, error: "solana_sbt_webhook_missing" };
+      const body = JSON.stringify(payload);
+      const headers = { "content-type": "application/json" };
+      const secret = solanaSbtWebhookSecret();
+      if (secret) {
+        const ts = String(now());
+        headers["x-sitebuilder-timestamp"] = ts;
+        headers["x-sitebuilder-signature"] = await hmacSha256Hex(secret, `${ts}.${body}`);
+      }
+      const r = await fetch(url, { method: "POST", headers, body });
+      const data = await r.json().catch(() => null);
+      if (!r.ok || !data || data.ok === false) {
+        return { ok: false, error: data?.error || `solana_sbt_webhook_failed:${r.status}` };
+      }
+      return { ok: true, txid: data.txid || null, data };
+    }
+
+    async function maybeGrantOnchainRewards(independent, dependent, sessionId) {
+      const billing = ensureBillingState(independent, dependent);
+      const wallet = independent?.person?.wallet || null;
+      if (!wallet || !wallet.address) return { ok: false, skipped: true, error: "no_wallet" };
+
+      const protocol = String(wallet.protocol || "").toLowerCase();
+      if (protocol === "evm") {
+        if (billing.onchain_polygon_sbt_txid) return { ok: true, already: true, chain: "polygon" };
+        try {
+          const result = await mintPolygonSbt(wallet.address);
+          if (result?.ok && result?.txid) {
+            billing.onchain_polygon_sbt_txid = String(result.txid).slice(0, 180);
+            billing.onchain_polygon_sbt_wallet = wallet.address;
+            billing.onchain_polygon_sbt_minted_at = now();
+            billing.onchain_polygon_sbt_error = null;
+          } else if (!result?.skipped) {
+            billing.onchain_polygon_sbt_error = result?.error || "polygon_sbt_failed";
+          }
+          return result;
+        } catch (error) {
+          billing.onchain_polygon_sbt_error = String(error?.message || error);
+          return { ok: false, error: billing.onchain_polygon_sbt_error };
+        }
+      }
+
+      if (protocol === "solana") {
+        if (billing.onchain_solana_sbt_txid) return { ok: true, already: true, chain: "solana" };
+        try {
+          const result = await mintSolanaSbtViaWebhook({
+            session_id: sessionId,
+            wallet_address: wallet.address,
+            network: resolveSolanaNetworkLabel(),
+            rpc_url: resolveSolanaRpcUrl(),
+            claim_txid: billing.onchain_claim_txid || null,
+            source: "sitebuilder_onboarding",
+          });
+          if (result?.ok && result?.txid) {
+            billing.onchain_solana_sbt_txid = String(result.txid).slice(0, 180);
+            billing.onchain_solana_sbt_wallet = wallet.address;
+            billing.onchain_solana_sbt_minted_at = now();
+            billing.onchain_solana_sbt_error = null;
+          } else if (!result?.skipped) {
+            billing.onchain_solana_sbt_error = result?.error || "solana_sbt_failed";
+          }
+          return result;
+        } catch (error) {
+          billing.onchain_solana_sbt_error = String(error?.message || error);
+          return { ok: false, error: billing.onchain_solana_sbt_error };
+        }
+      }
+      return { ok: false, skipped: true, error: "unsupported_wallet_protocol" };
     }
 
     function premiumBillingUsesGpu(backend) {
@@ -1404,6 +1649,14 @@ export default {
       billing.onchain_claim_memo = billing.onchain_claim_memo || null;
       billing.onchain_claim_wallet = billing.onchain_claim_wallet || null;
       billing.onchain_claim_pending = billing.onchain_claim_pending || null;
+      billing.onchain_polygon_sbt_txid = billing.onchain_polygon_sbt_txid || null;
+      billing.onchain_polygon_sbt_wallet = billing.onchain_polygon_sbt_wallet || null;
+      billing.onchain_polygon_sbt_minted_at = billing.onchain_polygon_sbt_minted_at || null;
+      billing.onchain_polygon_sbt_error = billing.onchain_polygon_sbt_error || null;
+      billing.onchain_solana_sbt_txid = billing.onchain_solana_sbt_txid || null;
+      billing.onchain_solana_sbt_wallet = billing.onchain_solana_sbt_wallet || null;
+      billing.onchain_solana_sbt_minted_at = billing.onchain_solana_sbt_minted_at || null;
+      billing.onchain_solana_sbt_error = billing.onchain_solana_sbt_error || null;
       billing.point_pack = billing.point_pack && typeof billing.point_pack === "object" ? billing.point_pack : {};
       billing.point_pack.price_usd = normalizedPointPackPriceUsd();
       billing.point_pack.points = normalizedPointPackAmount();
@@ -1847,6 +2100,7 @@ export default {
       if (/\b(no website|dont have.*website|do not have.*website|without.*website|no site)\b/.test(t)) return true;
       if (/\b(i need|need|want|would like|like)\b.{0,40}\b(website|site)\b/.test(t) && /\b(build|create|make|with you)\b/.test(t)) return true;
       if (/\b(build|create|make)\b.{0,40}\b(website|site)\b/.test(t) && /\b(with you|together)\b/.test(t)) return true;
+      if (/\b(not sure|unsure|not certain|haven't decided|have not decided|still deciding)\b/.test(t) && /\b(website|site)\b/.test(t)) return true;
       return false;
     }
 
@@ -6045,12 +6299,22 @@ ul { margin: 0; padding-left: 18px; }
         token_balance: billing.token_balance,
         points_balance: billing.points_balance,
         llm_backend: billing.llm_backend || resolvePremiumLlmBackend(),
-        gpu_billing_enabled: billing.gpu_billing_enabled === true,
-        gpu_endpoint: billing.gpu_endpoint || resolvePremiumGpuEndpoint(),
-        onchain_claimed: Boolean(billing.onchain_claim_txid),
-        onchain_claim_txid: billing.onchain_claim_txid ? String(billing.onchain_claim_txid) : null,
-        free_tokens: billing.free_tokens,
-        free_points: billing.free_points,
+          gpu_billing_enabled: billing.gpu_billing_enabled === true,
+          gpu_endpoint: billing.gpu_endpoint || resolvePremiumGpuEndpoint(),
+          onchain_claimed: Boolean(billing.onchain_claim_txid),
+          onchain_claim_txid: billing.onchain_claim_txid ? String(billing.onchain_claim_txid) : null,
+          onchain_rewards: {
+            polygon_sbt_txid: billing.onchain_polygon_sbt_txid ? String(billing.onchain_polygon_sbt_txid) : null,
+            polygon_wallet: billing.onchain_polygon_sbt_wallet || null,
+            polygon_minted_at: billing.onchain_polygon_sbt_minted_at || null,
+            polygon_error: billing.onchain_polygon_sbt_error || null,
+            solana_sbt_txid: billing.onchain_solana_sbt_txid ? String(billing.onchain_solana_sbt_txid) : null,
+            solana_wallet: billing.onchain_solana_sbt_wallet || null,
+            solana_minted_at: billing.onchain_solana_sbt_minted_at || null,
+            solana_error: billing.onchain_solana_sbt_error || null,
+          },
+          free_tokens: billing.free_tokens,
+          free_points: billing.free_points,
           tokens_spent: billing.tokens_spent,
           points_spent: billing.points_spent,
           topup_url: billing.topup_url || null,
@@ -6159,12 +6423,77 @@ ul { margin: 0; padding-left: 18px; }
       billing.onchain_claim_memo = pending.memo;
       billing.onchain_claim_wallet = wallet.address;
       billing.onchain_claim_pending = null;
+      let rewardResult = null;
+      try {
+        rewardResult = await maybeGrantOnchainRewards(independent, dependent, session_id);
+      } catch {
+        rewardResult = null;
+      }
       await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
       return json({
         ok: true,
         session_id,
         txid: billing.onchain_claim_txid,
         wallet: billing.onchain_claim_wallet,
+        reward: rewardResult ? {
+          ok: rewardResult.ok === true,
+          txid: rewardResult.txid || null,
+          error: rewardResult.error || null,
+          skipped: rewardResult.skipped === true,
+        } : null,
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/admin/mints") {
+      const auth = requireAdminToken(request, url);
+      if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status || 401);
+      const session_id = String(url.searchParams.get("session_id") || "").trim();
+      if (!session_id) return json({ ok: false, error: "session_id required" }, 400);
+
+      const loaded = await loadSessionVars(session_id, "onboarding_v8");
+      if (!loaded) return json({ ok: false, error: "Unknown session_id" }, 404);
+
+      const independent = loaded.independent || {};
+      const dependent = loaded.dependent || {};
+      const billing = ensureBillingState(independent, dependent);
+      const wallet = independent?.person?.wallet || null;
+
+      return json({
+        ok: true,
+        session_id,
+        user_id: independent?.account?.user_id || null,
+        wallet: wallet ? {
+          address: wallet.address || null,
+          protocol: wallet.protocol || null,
+          provider: wallet.provider || null,
+          chain_id: wallet.chain_id || null,
+        } : null,
+        onchain_claim: {
+          txid: billing.onchain_claim_txid || null,
+          wallet: billing.onchain_claim_wallet || null,
+          claimed_at: billing.onchain_claimed_at || null,
+          memo: billing.onchain_claim_memo || null,
+          pending: billing.onchain_claim_pending || null,
+        },
+        polygon_sbt: {
+          txid: billing.onchain_polygon_sbt_txid || null,
+          wallet: billing.onchain_polygon_sbt_wallet || null,
+          minted_at: billing.onchain_polygon_sbt_minted_at || null,
+          error: billing.onchain_polygon_sbt_error || null,
+        },
+        solana_sbt: {
+          txid: billing.onchain_solana_sbt_txid || null,
+          wallet: billing.onchain_solana_sbt_wallet || null,
+          minted_at: billing.onchain_solana_sbt_minted_at || null,
+          error: billing.onchain_solana_sbt_error || null,
+        },
+        billing: {
+          token_balance: billing.token_balance,
+          points_balance: billing.points_balance,
+          active_unit: billing.active_unit,
+          premium_enabled: billing.premium_enabled === true,
+          llm_backend: billing.llm_backend || resolvePremiumLlmBackend(),
+        },
       });
     }
 
@@ -9195,13 +9524,20 @@ ul { margin: 0; padding-left: 18px; }
       };
       ensureBillingState(independent, dependent);
 
+      try {
+        await maybeGrantOnchainRewards(independent, dependent, session_id);
+      } catch {
+        // Best-effort only; onboarding should not fail if reward minting fails.
+      }
+
       await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
 
       const helloName = greeting_name || `${first_name} ${last_name}`.trim();
       const prompt = `Hello ${helloName}, Could you please describe your business to me briefly?`;
 
       const t = await nextTurnId(env.DB, session_id);
-      await logEvent(env.DB, session_id, t, "assistant", "Q1_DESCRIBE", prompt);
+      const startAssistantEvent = await logEvent(env.DB, session_id, t, "assistant", "Q1_DESCRIBE", prompt);
+      await archiveTurnToR2(startAssistantEvent, session_created_at);
       await flushSessionToR2(env.DB, session_id, session_created_at);
 
       const billingSnapshot = {
@@ -9218,6 +9554,16 @@ ul { margin: 0; padding-left: 18px; }
         llm_backend: dependent?.billing?.llm_backend || resolvePremiumLlmBackend(),
         gpu_billing_enabled: dependent?.billing?.gpu_billing_enabled === true,
         gpu_endpoint: dependent?.billing?.gpu_endpoint || resolvePremiumGpuEndpoint(),
+        onchain_rewards: {
+          polygon_sbt_txid: dependent?.billing?.onchain_polygon_sbt_txid || null,
+          polygon_wallet: dependent?.billing?.onchain_polygon_sbt_wallet || null,
+          polygon_minted_at: dependent?.billing?.onchain_polygon_sbt_minted_at || null,
+          polygon_error: dependent?.billing?.onchain_polygon_sbt_error || null,
+          solana_sbt_txid: dependent?.billing?.onchain_solana_sbt_txid || null,
+          solana_wallet: dependent?.billing?.onchain_solana_sbt_wallet || null,
+          solana_minted_at: dependent?.billing?.onchain_solana_sbt_minted_at || null,
+          solana_error: dependent?.billing?.onchain_solana_sbt_error || null,
+        },
         pricing_model: {
           base_tokens: normalizedPremiumBaseCost(),
           per_page_tokens: normalizedPremiumPerPageCost(),
@@ -9305,7 +9651,8 @@ ul { margin: 0; padding-left: 18px; }
 
       // log USER
       const userTurn = await nextTurnId(env.DB, session_id);
-      await logEvent(env.DB, session_id, userTurn, "user", state, answerText);
+      const userEvent = await logEvent(env.DB, session_id, userTurn, "user", state, answerText);
+      await archiveTurnToR2(userEvent, session_created_at);
       applyAnswerToFunnelSignals(state, answerText, dependent);
 
       const reply = async (obj) => {
@@ -9317,7 +9664,8 @@ ul { margin: 0; padding-left: 18px; }
         await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
 
         const assistantTurn = await nextTurnId(env.DB, session_id);
-        await logEvent(env.DB, session_id, assistantTurn, "assistant", obj.next_state || state, obj.prompt || "");
+        const assistantEvent = await logEvent(env.DB, session_id, assistantTurn, "assistant", obj.next_state || state, obj.prompt || "");
+        await archiveTurnToR2(assistantEvent, session_created_at);
         await flushSessionToR2(env.DB, session_id, session_created_at);
         return json(obj);
       };
@@ -9929,10 +10277,11 @@ ul { margin: 0; padding-left: 18px; }
         const foundUrl = extractUrlFromText(text);
         const v = yesNoMaybe(text);
         const noCurrentSite = impliesNoCurrentWebsite(text);
+        const intentOnlyReply = !foundUrl && !v && normalizeWebsiteIntentText(text).split(/\s+/).length >= 4;
         const referenceUrl = sanitizeReferenceUrl(foundUrl);
         const sameLocationIntent = /\b(same location|same area|same zip|same zipcode|same zip code|same city|same town)\b/i.test(text);
 
-        if (v === "no" || noCurrentSite) {
+        if (v === "no" || noCurrentSite || intentOnlyReply) {
           independent.business.own_site_url = null;
           independent.business.own_site_confirmed = false;
           dependent.research = dependent.research || {};
