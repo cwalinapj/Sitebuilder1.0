@@ -9220,6 +9220,10 @@ ul { margin: 0; padding-left: 18px; }
       const loginMethod = String(body?.login_method || "name")
         .trim()
         .toLowerCase();
+      const uiThemeMode = ["web3", "classic"].includes(String(body?.ui_theme_mode || "").trim().toLowerCase())
+        ? String(body.ui_theme_mode).trim().toLowerCase()
+        : null;
+      const walletExtensionDetected = body?.wallet_extension_detected === true;
       let first_name = null;
       let last_name = null;
       let greeting_name = null;
@@ -9271,6 +9275,8 @@ ul { margin: 0; padding-left: 18px; }
         account: {
           user_id,
           auth_method: person_auth_method,
+          ui_theme_mode: uiThemeMode,
+          wallet_extension_detected: walletExtensionDetected,
         },
 
         business: {

@@ -19,6 +19,32 @@
       --btn-bg: #f3f7fb;
       --btn-border: #ccd9e8;
     }
+    body[data-theme="classic"] {
+      --bg: #f6f8f7;
+      --panel-bg: #ffffff;
+      --panel-border: #d5e0d8;
+      --text: #1c2b22;
+      --muted: #5d7163;
+      --accent: #0f7a3f;
+      --accent-ink: #ffffff;
+      --ai-bubble: #edf5ef;
+      --me-bubble: #e6f5ec;
+      --btn-bg: #f4f8f6;
+      --btn-border: #c8d7cd;
+    }
+    body[data-theme="web3"] {
+      --bg: #0b0e14;
+      --panel-bg: #0f1520;
+      --panel-border: #23314a;
+      --text: #e6edf8;
+      --muted: #95a7c3;
+      --accent: #00d3a7;
+      --accent-ink: #03110e;
+      --ai-bubble: #141f2f;
+      --me-bubble: #122723;
+      --btn-bg: #101c2a;
+      --btn-border: #254163;
+    }
     body {
       font-family: "Plus Jakarta Sans", "Avenir Next", "Segoe UI", sans-serif;
       max-width: 920px;
@@ -28,6 +54,18 @@
       background:
         radial-gradient(circle at top right, #ddeeff 0%, rgba(221,238,255,0) 35%),
         radial-gradient(circle at bottom left, #dcf6e8 0%, rgba(220,246,232,0) 35%),
+        var(--bg);
+    }
+    body[data-theme="web3"] {
+      background:
+        radial-gradient(circle at top right, rgba(60, 116, 255, 0.24) 0%, rgba(17,22,35,0) 40%),
+        radial-gradient(circle at bottom left, rgba(0, 211, 167, 0.2) 0%, rgba(8,11,18,0) 40%),
+        linear-gradient(180deg, #090d15, #0a1018 45%, #0b0f16);
+    }
+    body[data-theme="classic"] {
+      background:
+        radial-gradient(circle at top right, #e7f4ea 0%, rgba(231,244,234,0) 35%),
+        radial-gradient(circle at bottom left, #eef6ff 0%, rgba(238,246,255,0) 35%),
         var(--bg);
     }
     .topRibbon {
@@ -41,6 +79,16 @@
       border-radius: 16px;
       padding: 10px 12px;
       box-shadow: 0 18px 34px rgba(18, 44, 75, 0.08);
+    }
+    body[data-theme="web3"] .topRibbon {
+      background: rgba(14, 22, 36, 0.88);
+      border-color: #2a3d5d;
+      box-shadow: 0 22px 40px rgba(2, 10, 24, 0.48);
+      backdrop-filter: blur(8px);
+    }
+    body[data-theme="classic"] .topRibbon {
+      border-radius: 12px;
+      box-shadow: 0 10px 24px rgba(29, 56, 41, 0.08);
     }
     .brand {
       display: flex;
@@ -57,6 +105,15 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+    }
+    body[data-theme="web3"] .brandLogo {
+      border-color: #39598a;
+      background: linear-gradient(145deg, #12243b, #0e1a2a);
+      box-shadow: inset 0 1px 0 rgba(186, 216, 255, 0.12), 0 10px 20px rgba(0, 0, 0, 0.5);
+    }
+    body[data-theme="classic"] .brandLogo {
+      border-radius: 10px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 6px 12px rgba(24, 73, 43, 0.1);
     }
     .brandLogo svg {
       width: 24px;
@@ -75,11 +132,24 @@
       color: #153657;
       text-transform: uppercase;
     }
+    body[data-theme="web3"] .brandName {
+      color: #dfe8fb;
+      letter-spacing: 0.08em;
+    }
+    body[data-theme="classic"] .brandName {
+      color: #21412d;
+    }
     .brandSub {
       font-size: 11px;
       color: #5a7491;
       letter-spacing: 0.02em;
       margin-top: 2px;
+    }
+    body[data-theme="web3"] .brandSub {
+      color: #9cb2d3;
+    }
+    body[data-theme="classic"] .brandSub {
+      color: #5e7668;
     }
     .ribbonRight {
       display: flex;
@@ -109,6 +179,33 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-weight: 700;
+    }
+    body[data-theme="web3"] .frameworkBadge {
+      border-color: #2d4669;
+      background: #101c2c;
+      color: #c9daf6;
+    }
+    body[data-theme="classic"] .frameworkBadge {
+      border-radius: 12px;
+      text-transform: none;
+      letter-spacing: 0.02em;
+      font-weight: 600;
+      color: #2e4a39;
+      border-color: #c8d9cd;
+      background: #f8fbf8;
+    }
+    .themePill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border: 1px solid var(--btn-border);
+      border-radius: 999px;
+      background: var(--btn-bg);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
     .frameworkBadge img {
       width: 16px;
@@ -141,6 +238,13 @@
       background: var(--panel-bg);
       box-shadow: 0 12px 30px rgba(21, 44, 75, 0.08);
       margin: 0 auto;
+    }
+    body[data-theme="web3"] #chat {
+      box-shadow: 0 14px 28px rgba(0, 0, 0, 0.42);
+    }
+    body[data-theme="classic"] #chat {
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(32, 60, 40, 0.1);
     }
     .msg { margin: 10px 0; white-space: pre-wrap; line-height: 1.35; }
     .ai { color: var(--text); }
@@ -290,6 +394,16 @@
       margin-bottom: 10px;
       box-shadow: 0 8px 24px rgba(24, 49, 80, 0.08);
     }
+    body[data-theme="web3"] #startPanel {
+      border-color: #2a3e5f;
+      background: linear-gradient(180deg, rgba(16,24,38,0.95), rgba(12,18,29,0.95));
+      box-shadow: 0 14px 26px rgba(0, 0, 0, 0.38);
+    }
+    body[data-theme="classic"] #startPanel {
+      border-radius: 12px;
+      border-color: #cfddcf;
+      box-shadow: 0 8px 18px rgba(33, 64, 45, 0.08);
+    }
     .startTitle {
       font-size: 15px;
       font-weight: 700;
@@ -297,6 +411,8 @@
       text-align: center;
       letter-spacing: 0.02em;
     }
+    body[data-theme="web3"] .startTitle { color: #d8e5fb; }
+    body[data-theme="classic"] .startTitle { color: #1e3e2a; }
     .startSub {
       margin-top: 4px;
       color: var(--muted);
@@ -332,6 +448,16 @@
       background: #173b62;
       color: #fff;
       border-color: #173b62;
+    }
+    body[data-theme="web3"] .startBtn.primary {
+      background: linear-gradient(180deg, #18cfa8, #08a585);
+      color: #03130f;
+      border-color: #1ed8b2;
+    }
+    body[data-theme="classic"] .startBtn.primary {
+      background: #118848;
+      border-color: #118848;
+      color: #fff;
     }
     .startIconWrap {
       width: 20px;
@@ -471,6 +597,7 @@
       </div>
     </div>
     <div class="ribbonRight">
+      <div class="themePill" id="themePill">Theme: Auto</div>
       <div class="ribbonCaption">Supported frameworks</div>
       <div class="frameworkBadge">
         <img src="https://www.google.com/s2/favicons?sz=64&domain_url=nextjs.org" alt="Next.js"/>
@@ -491,8 +618,8 @@
     </div>
   </div>
   <div id="startPanel">
-    <div class="startTitle">Sign in with wallet (no transaction)</div>
-    <div class="startSub">This signs a message to prove ownership. It does not move funds.</div>
+    <div class="startTitle" id="startTitle">Sign in with wallet (no transaction)</div>
+    <div class="startSub" id="startSub">This signs a message to prove ownership. It does not move funds.</div>
     <div class="startRow">
       <button class="startBtn primary" id="startNameBtn" type="button">
         <span class="startIconWrap" aria-hidden="true">N</span>
@@ -558,6 +685,8 @@
     const input = document.getElementById("input");
     const form = document.getElementById("form");
     const startPanel = document.getElementById("startPanel");
+    const startTitle = document.getElementById("startTitle");
+    const startSub = document.getElementById("startSub");
     const startHint = document.getElementById("startHint");
     const startNameBtn = document.getElementById("startNameBtn");
     const walletMetaMaskBtn = document.getElementById("walletMetaMaskBtn");
@@ -575,6 +704,7 @@
     const billingPricing = document.getElementById("billingPricing");
     const billingBalance = document.getElementById("billingBalance");
     const billingActions = document.getElementById("billingActions");
+    const themePill = document.getElementById("themePill");
     let autoAdvanceTimer = null;
     let pendingRequest = false;
     let walletSession = null;
@@ -591,8 +721,64 @@
     let turnstileWidgetId = null;
     let turnstileResolve = null;
     let turnstileReject = null;
+    let currentThemeMode = "classic";
     function tollTokenLabel() {
       return "Toll Tokens";
+    }
+
+    function detectWalletExtensionPresence() {
+      const eth = window.ethereum;
+      const providers = Array.isArray(eth?.providers) ? eth.providers : [];
+      const hasEvm = Boolean(eth || providers.length || window.phantom?.ethereum);
+      const hasSolana = Boolean(window.phantom?.solana || window.solana?.isPhantom || window.solflare?.isSolflare);
+      return hasEvm || hasSolana;
+    }
+
+    function setThemeCopy(theme) {
+      if (!startTitle || !startSub || !startHint) return;
+      if (theme === "web3") {
+        startTitle.textContent = "Wallet-first mode (no transaction to sign in)";
+        startSub.textContent = "Web3 extension detected. Message-sign only for login.";
+        startHint.textContent = "No approvals. No gas to sign in. Transactions are only for top-ups.";
+        return;
+      }
+      startTitle.textContent = "Choose how you want to sign in";
+      startSub.textContent = "Classic mode for broad audiences. Wallet sign-in stays optional.";
+      startHint.textContent = "No approvals. No gas. Disconnect anytime. Transactions are only for top-ups.";
+    }
+
+    function applyTheme(theme, source = "auto") {
+      const mode = theme === "web3" ? "web3" : "classic";
+      currentThemeMode = mode;
+      document.body.setAttribute("data-theme", mode);
+      setThemeCopy(mode);
+      if (themePill) {
+        const sourceLabel = source === "query" ? "manual" : source;
+        themePill.textContent = `Theme: ${mode} (${sourceLabel})`;
+      }
+    }
+
+    function resolveInitialTheme() {
+      const q = new URLSearchParams(window.location.search).get("theme");
+      if (q === "web3" || q === "classic") {
+        applyTheme(q, "query");
+        return;
+      }
+      const detected = detectWalletExtensionPresence();
+      applyTheme(detected ? "web3" : "classic", "auto");
+
+      if (!detected) {
+        let checks = 0;
+        const timer = setInterval(() => {
+          checks += 1;
+          if (detectWalletExtensionPresence()) {
+            applyTheme("web3", "auto");
+            clearInterval(timer);
+            return;
+          }
+          if (checks >= 6) clearInterval(timer);
+        }, 600);
+      }
     }
 
     async function workerFetch(path, options = {}) {
@@ -1455,7 +1641,12 @@
       const r = await workerFetch("/q1/start", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...payload, turnstile_token: turnstileToken }),
+        body: JSON.stringify({
+          ...payload,
+          turnstile_token: turnstileToken,
+          ui_theme_mode: currentThemeMode,
+          wallet_extension_detected: detectWalletExtensionPresence(),
+        }),
       });
       const data = await r.json();
       if (!r.ok || !data?.ok) throw new Error(String(data?.error || "Could not start chat."));
@@ -1676,6 +1867,8 @@
     walletConnectBtn.addEventListener("click", () => handleStartAction("walletconnect"));
     walletLedgerBtn.addEventListener("click", () => handleStartAction("ledger"));
     walletPhantomBtn.addEventListener("click", () => handleStartAction("phantom"));
+
+    resolveInitialTheme();
 
     loadSecurityConfig().then((cfg) => {
       if (!cfg.walletconnect_project_id) {
