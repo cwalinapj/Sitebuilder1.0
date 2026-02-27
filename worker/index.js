@@ -1398,6 +1398,20 @@ export default {
       return { ok: true, memo: memoFound };
     }
 
+    async function fetchSolanaLatestBlockhash(rpcUrl) {
+      const resp = await solanaRpcCall(rpcUrl, "getLatestBlockhash", [{ commitment: "confirmed" }]);
+      if (!resp.ok) return resp;
+      const value = resp.result?.value || null;
+      if (!value?.blockhash) {
+        return { ok: false, error: "Could not fetch latest blockhash." };
+      }
+      return {
+        ok: true,
+        blockhash: String(value.blockhash),
+        lastValidBlockHeight: Number(value.lastValidBlockHeight || 0),
+      };
+    }
+
     async function mintPolygonSbt(toAddress) {
       if (!polygonSbtEnabled()) return { ok: false, skipped: true, error: "polygon_sbt_disabled" };
       const webhookUrl = polygonSbtWebhookUrl();
@@ -6368,6 +6382,11 @@ ul { margin: 0; padding-left: 18px; }
       }
       const claimId = newId("clm");
       const memo = `sitebuilder:claim:${session_id}:${wallet.address}:${claimId}`;
+      const rpcUrl = resolveSolanaRpcUrl();
+      const blockhash = await fetchSolanaLatestBlockhash(rpcUrl);
+      if (!blockhash.ok) {
+        return json({ ok: false, error: blockhash.error || "Could not fetch Solana blockhash for claim." }, 502);
+      }
       billing.onchain_claim_pending = {
         claim_id: claimId,
         memo,
@@ -6381,8 +6400,12 @@ ul { margin: 0; padding-left: 18px; }
         memo,
         claim_id: claimId,
         wallet: wallet.address,
-        rpc_url: resolveSolanaRpcUrl(),
+        rpc_url: rpcUrl,
         network: resolveSolanaNetworkLabel(),
+        recent_blockhash: blockhash.blockhash,
+        last_valid_block_height: Number.isFinite(Number(blockhash.lastValidBlockHeight))
+          ? Number(blockhash.lastValidBlockHeight)
+          : null,
         memo_program: "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
       });
     }

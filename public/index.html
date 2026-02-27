@@ -1053,7 +1053,6 @@
         if (!solanaWeb3) throw new Error("Solana web3 not available.");
         const provider = window.phantom?.solana || window.solana;
         if (!provider || !provider.isPhantom) throw new Error("Phantom Solana wallet was not detected.");
-        const connection = new solanaWeb3.Connection(prepData.rpc_url, "confirmed");
         const memoProgram = new solanaWeb3.PublicKey(prepData.memo_program);
         const memoData = new TextEncoder().encode(String(prepData.memo || ""));
         const memoIx = new solanaWeb3.TransactionInstruction({
@@ -1062,21 +1061,34 @@
           data: memoData,
         });
         const tx = new solanaWeb3.Transaction().add(memoIx);
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-        tx.recentBlockhash = blockhash;
+        const recentBlockhash = String(prepData.recent_blockhash || "").trim();
+        if (!recentBlockhash) throw new Error("Claim preparation failed: missing recent blockhash.");
+        tx.recentBlockhash = recentBlockhash;
+        const lastValid = Number(prepData.last_valid_block_height || 0);
+        if (Number.isFinite(lastValid) && lastValid > 0) tx.lastValidBlockHeight = lastValid;
         tx.feePayer = new solanaWeb3.PublicKey(walletSession.address);
         const signed = await provider.signAndSendTransaction(tx, { preflightCommitment: "confirmed" });
         const signature = String(signed?.signature || signed);
         if (!signature) throw new Error("No signature returned from wallet.");
-        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
-        const confirm = await workerFetch("/wallet/claim/confirm", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, txid: signature }),
-        });
-        const confirmData = await confirm.json();
-        if (!confirm.ok || !confirmData?.ok) {
-          addMsg("ai", confirmData?.error || "Could not confirm on-chain claim.");
+        let confirmData = null;
+        let confirmed = false;
+        for (let i = 0; i < 6; i++) {
+          const confirm = await workerFetch("/wallet/claim/confirm", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, txid: signature }),
+          });
+          const data = await confirm.json();
+          confirmData = data;
+          if (confirm.ok && data?.ok) {
+            confirmed = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+        }
+        if (!confirmed || !confirmData?.ok) {
+          addMsg("ai", confirmData?.error || "Could not confirm on-chain claim right now.");
+          addMsg("ai", "Your Toll Tokens are already available; claim is optional and does not affect your starter balance.");
           return;
         }
         addMsg("ai", `On-chain claim recorded. Tx: ${confirmData.txid}`);
@@ -1090,7 +1102,9 @@
           }
         }
       } catch (error) {
-        addMsg("ai", String(error?.message || "On-chain claim failed."));
+        const msg = String(error?.message || "On-chain claim failed.");
+        addMsg("ai", msg);
+        addMsg("ai", "Your Toll Tokens are already available; claim is optional and does not affect your starter balance.");
       }
     }
 
@@ -1469,7 +1483,7 @@
           onchainClaimShown = true;
           addMsg(
             "ai",
-            "Optional: record a one-time on-chain claim (memo-only transaction) so your wallet is eligible for future rewards."
+            "Optional: record a one-time on-chain claim (memo-only transaction) for future rewards. This is not required to use your Toll Tokens."
           );
           addInlineActionButton("Record On-chain Claim", startOnchainClaim);
         }
