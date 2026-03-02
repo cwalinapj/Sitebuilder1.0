@@ -1500,6 +1500,59 @@ ul { margin: 0; padding-left: 18px; }
       return mentionsSite && mentionsAudit;
     }
 
+    function fallbackHelpPath(text) {
+      const t = String(text || "").toLowerCase();
+      if (/\b(plugin|wordpress plugin|wp plugin|plugin website|sell.*plugin|landing page.*plugin)\b/.test(t)) {
+        return "plugin_sales_site";
+      }
+      if (wantsWebsiteAuditFirst(t)) return "wordpress_audit";
+      return "general_site_build";
+    }
+
+    async function classifyHelpPathWithOpenAI(text) {
+      const apiKey = String(env.OPENAI_API_KEY || "").trim();
+      if (!apiKey) return null;
+      const raw = String(text || "").trim().slice(0, 500);
+      if (!raw) return null;
+      try {
+        const r = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: "gpt-4.1-mini",
+            input:
+              "Classify the user intent into exactly one path code:\n" +
+              "plugin_sales_site = user wants a website to sell/market a WordPress plugin.\n" +
+              "wordpress_audit = user asks to audit/review/check an existing website.\n" +
+              "general_site_build = everything else (normal site building flow).\n\n" +
+              `User: "${raw}"\n` +
+              'Return only JSON like {"path":"plugin_sales_site"} with no extra text.',
+          }),
+        });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const output =
+          data?.output_text ||
+          data?.output?.map((o) => o?.content?.map((c) => c?.text || "").join("\n") || "").join("\n") ||
+          "";
+        const m = String(output || "").match(/"path"\s*:\s*"([a-z_]+)"/i);
+        const path = m ? m[1].toLowerCase() : String(output || "").trim().toLowerCase();
+        if (["plugin_sales_site", "wordpress_audit", "general_site_build"].includes(path)) return path;
+        return null;
+      } catch {
+        return null;
+      }
+    }
+
+    async function resolveHelpPath(text) {
+      const ai = await classifyHelpPathWithOpenAI(text);
+      if (ai) return { path: ai, source: "openai" };
+      return { path: fallbackHelpPath(text), source: "fallback" };
+    }
+
     function wantsWordpressAuditNow(text) {
       const t = String(text || "").toLowerCase();
       return (
@@ -4361,7 +4414,7 @@ ul { margin: 0; padding-left: 18px; }
 
       const dependent = {
         draft: { type_guess: null, type_candidates: [], type_source: null },
-        flow: { expected_state: "Q1_DESCRIBE", audit_requested: false },
+        flow: { expected_state: "Q0_HELP_INTENT", audit_requested: false, entry_path: null, entry_path_source: null },
         name_proposals: [],
         scan: {
           status: null,
@@ -4508,13 +4561,13 @@ ul { margin: 0; padding-left: 18px; }
 
       await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
 
-      const prompt = `Hello ${first_name} ${last_name}, Could you please describe your business to me briefly?`;
+      const prompt = `Hello ${first_name} ${last_name}, What can I help you with today?`;
 
       const t = await nextTurnId(env.DB, session_id);
-      await logEvent(env.DB, session_id, t, "assistant", "Q1_DESCRIBE", prompt);
+      await logEvent(env.DB, session_id, t, "assistant", "Q0_HELP_INTENT", prompt);
       await flushSessionToR2(env.DB, session_id, session_created_at);
 
-      return json({ ok: true, user_id, session_id, next_state: "Q1_DESCRIBE", prompt });
+      return json({ ok: true, user_id, session_id, next_state: "Q0_HELP_INTENT", prompt });
     }
 
     // ANSWER
@@ -4845,6 +4898,60 @@ ul { margin: 0; padding-left: 18px; }
           funnel_stage: funnelSummary.stage,
           upgrade_score: funnelSummary.score,
           cta_actions: funnelSummary.actions,
+        });
+      }
+
+      // Q0
+      if (state === "Q0_HELP_INTENT") {
+        const intent = answerText.slice(0, 500);
+        if (!intent) return json({ ok: false, error: "Please tell me what you want help with today." }, 400);
+
+        const resolvedPath = await resolveHelpPath(intent);
+        dependent.flow = dependent.flow || {};
+        dependent.flow.entry_path = resolvedPath.path;
+        dependent.flow.entry_path_source = resolvedPath.source;
+        dependent.flow.entry_prompt = intent;
+
+        if (resolvedPath.path === "plugin_sales_site") {
+          return await reply({
+            ok: true,
+            next_state: "Q_PLUGIN_SALES_BRIEF",
+            prompt:
+              "Perfect — I can help build a website to sell your WordPress plugin. " +
+              "In one short message, tell me the plugin name (or working name), the main problem it solves, and who it is for.",
+          });
+        }
+
+        if (resolvedPath.path === "wordpress_audit") {
+          dependent.flow.audit_requested = true;
+          return await reply({
+            ok: true,
+            next_state: "Q2_PASTE_URL_OR_NO",
+            prompt:
+              "Absolutely — I can run a website audit first. Please paste your website URL so I can review it headlessly (or reply “no website”).",
+          });
+        }
+
+        return await reply({
+          ok: true,
+          next_state: "Q1_DESCRIBE",
+          prompt: "Great — could you briefly describe your business?",
+        });
+      }
+
+      if (state === "Q_PLUGIN_SALES_BRIEF") {
+        const brief = answerText.slice(0, 500);
+        if (!brief) return json({ ok: false, error: "Please share a short plugin sales brief." }, 400);
+        independent.business.description_raw = brief;
+        dependent.draft.type_guess = "wordpress plugin company";
+        dependent.draft.type_source = "entry_path";
+        independent.business.type_final = "wordpress plugin company";
+        if (!independent.build.goal) independent.build.goal = "Sell a WordPress plugin with clear CTA and trust signals";
+        return await reply({
+          ok: true,
+          next_state: "Q2_PASTE_URL_OR_NO",
+          prompt:
+            "Please paste your current website URL (if you have one), a similar site you like, or reply “no website”.",
         });
       }
 
