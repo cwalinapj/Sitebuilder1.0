@@ -1560,6 +1560,7 @@ ul { margin: 0; padding-left: 18px; }
       labels: null,
       aliases: null,
       signals: null,
+      source: null,
     };
 
     function basicNormalizeBusinessTypeLabel(text) {
@@ -1592,6 +1593,7 @@ ul { margin: 0; padding-left: 18px; }
           labels: businessTypeCatalogCache.labels,
           aliases: businessTypeCatalogCache.aliases,
           signals: businessTypeCatalogCache.signals,
+          source: businessTypeCatalogCache.source,
         };
       }
 
@@ -1618,7 +1620,9 @@ ul { margin: 0; padding-left: 18px; }
               ])
               .filter(([alias, canonical]) => alias && canonical)
           );
-        } catch {}
+        } catch {
+          aliases = new Map();
+        }
         try {
           const signalRes = await env.DB.prepare(
             `SELECT id, canonical_type, signal_type, value, normalized_value, weight
@@ -1635,29 +1639,33 @@ ul { margin: 0; padding-left: 18px; }
               weight: Number(row?.weight ?? 1),
             }))
             .filter((row) => row.canonical_type && row.signal_type && row.normalized_value);
-        } catch {}
-
-        if (labels.size) {
-          businessTypeCatalogCache.labels = labels;
-          businessTypeCatalogCache.aliases = aliases.size ? aliases : fallbackBusinessTypeAliasMap();
-          businessTypeCatalogCache.signals = signals;
-          businessTypeCatalogCache.loadedAt = nowMs;
-          return {
-            labels: businessTypeCatalogCache.labels,
-            aliases: businessTypeCatalogCache.aliases,
-            signals: businessTypeCatalogCache.signals,
-          };
+        } catch {
+          signals = [];
         }
+
+        businessTypeCatalogCache.labels = labels;
+        businessTypeCatalogCache.aliases = aliases;
+        businessTypeCatalogCache.signals = signals;
+        businessTypeCatalogCache.loadedAt = nowMs;
+        businessTypeCatalogCache.source = "d1";
+        return {
+          labels: businessTypeCatalogCache.labels,
+          aliases: businessTypeCatalogCache.aliases,
+          signals: businessTypeCatalogCache.signals,
+          source: businessTypeCatalogCache.source,
+        };
       } catch {}
 
       businessTypeCatalogCache.labels = fallbackBusinessTypeLabelSet();
       businessTypeCatalogCache.aliases = fallbackBusinessTypeAliasMap();
       businessTypeCatalogCache.signals = [];
       businessTypeCatalogCache.loadedAt = nowMs;
+      businessTypeCatalogCache.source = "fallback";
       return {
         labels: businessTypeCatalogCache.labels,
         aliases: businessTypeCatalogCache.aliases,
         signals: businessTypeCatalogCache.signals,
+        source: businessTypeCatalogCache.source,
       };
     }
 
@@ -1667,14 +1675,14 @@ ul { margin: 0; padding-left: 18px; }
       const { labels, aliases } = await getBusinessTypeCatalogSnapshot();
       if (labels.has(normalized)) return normalized;
 
-      const aliasMapped = aliases.get(normalized) || BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
+      const aliasMapped = aliases.get(normalized) || normalized;
       if (labels.has(aliasMapped)) return aliasMapped;
       return aliasMapped;
     }
 
     function normalizeBusinessTypeLabel(text) {
       const normalized = basicNormalizeBusinessTypeLabel(text);
-      return BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
+      return normalized;
     }
 
     function signalWeightDefault(signalType) {
@@ -1690,10 +1698,9 @@ ul { margin: 0; padding-left: 18px; }
     function includesPhrase(normalizedText, normalizedNeedle) {
       if (!normalizedText || !normalizedNeedle) return false;
       if (normalizedText === normalizedNeedle) return true;
-      return normalizedText.includes(` ${normalizedNeedle} `) ||
-        normalizedText.startsWith(`${normalizedNeedle} `) ||
-        normalizedText.endsWith(` ${normalizedNeedle}`) ||
-        normalizedText.includes(normalizedNeedle);
+      const escaped = normalizedNeedle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      const re = new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`);
+      return re.test(normalizedText);
     }
 
     async function classifyBusinessTypeFromCatalog(description) {
@@ -1778,19 +1785,19 @@ ul { margin: 0; padding-left: 18px; }
     function fallbackSubtypeCandidates(desc) {
       const s = String(desc || "").toLowerCase();
       if (/(car repair|auto repair|mechanic|garage|brake|engine repair|transmission)/.test(s)) {
-        return ["auto repair shop", "mechanic shop", "tire repair shop"];
+        return ["auto repair shop"];
       }
       if (/(tire|tyre|flat repair|wheel alignment)/.test(s)) {
-        return ["tire repair shop", "auto repair shop", "mechanic shop"];
+        return ["auto repair shop"];
       }
       if (/(body shop|collision|paint shop|dent repair)/.test(s)) {
-        return ["auto body shop", "collision repair shop", "paint and body shop"];
+        return ["auto repair shop"];
       }
       if (/(roofing|roofer)/.test(s)) {
-        return ["roofing contractor", "roof repair company", "general contractor"];
+        return ["roofing company", "construction company"];
       }
       if (/(hvac|heating|cooling|air conditioning|furnace)/.test(s)) {
-        return ["hvac contractor", "heating and cooling service", "air conditioning service"];
+        return ["hvac company"];
       }
       return [];
     }
@@ -1998,7 +2005,7 @@ ul { margin: 0; padding-left: 18px; }
       }
 
       const deterministic = await canonicalizeBusinessTypeLabel(guessBusinessType(description));
-      if (deterministic && deterministic !== "local business") {
+      if (deterministic) {
         return { source: "heuristic", candidates: [deterministic] };
       }
 
@@ -2008,21 +2015,27 @@ ul { margin: 0; padding-left: 18px; }
       const normalized = [];
       for (const item of merged) {
         const label = await canonicalizeBusinessTypeLabel(item);
-        if (label && label !== "local business") normalized.push(label);
+        if (label) normalized.push(label);
       }
       const candidates = Array.from(new Set(normalized)).slice(0, 3);
 
-      if (!candidates.length) return { source: "fallback", candidates: ["local business"] };
+      if (!candidates.length) return { source: "fallback", candidates: ["professional services business"] };
       return { source: ai.length ? "openai" : "fallback", candidates };
     }
 
     function guessBusinessType(desc) {
       const s = (desc || "").toLowerCase();
       if (/(web3|web 3|blockchain|crypto|solana|ethereum|evm|smart contract|dapp|dao|defi|nft)/.test(s)) {
-        return "web3 development";
+        return "web 3 development";
       }
-      if (/(developer|software|engineer|programmer|coding|build apps|build websites|web dev|web developer)/.test(s)) {
-        return "software development";
+      if (/(freelance developer|independent developer|solo developer)/.test(s)) {
+        return "freelance developer";
+      }
+      if (/(web dev|web developer|website designer|build websites|wordpress developer|website build)/.test(s)) {
+        return "web development service";
+      }
+      if (/(software|engineer|programmer|coding|build apps|saas|app development)/.test(s)) {
+        return "software company";
       }
       if (/(coffee shop|coffeehouse|espresso bar)/.test(s)) return "coffee shop";
       if (/(cafe|café)/.test(s)) return "cafe";
@@ -2041,11 +2054,10 @@ ul { margin: 0; padding-left: 18px; }
         return "dive services";
       if (/(landscap|lawn|yard|hardscape|mulch|irrigation|sprinkler)/.test(s)) return "landscaping company";
       if (/(restaurant|cafe|pizza|tacos|burger|bar|bistro|diner|sushi|menu)/.test(s)) return "restaurant";
-      if (/(plumb|drain|water heater|pipe|leak|sewer)/.test(s)) return "plumber";
-      if (/(electric|breaker|panel|wiring|outlet|lighting)/.test(s)) return "electrician";
-      if (/(barber|haircut|fade|beard|shave|salon)/.test(s)) return "barber";
-      if (/(sell cars|selling cars|car dealer|dealership|used cars|new cars)/.test(s)) return "car dealership";
-      return "local business";
+      if (/(plumb|drain|water heater|pipe|leak|sewer)/.test(s)) return "plumbing company";
+      if (/(electric|breaker|panel|wiring|outlet|lighting)/.test(s)) return "electrical company";
+      if (/(haircut|fade|beard|shave|salon)/.test(s)) return "barbershop";
+      return null;
     }
 
     function parseSpend(text) {

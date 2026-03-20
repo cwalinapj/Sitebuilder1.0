@@ -929,6 +929,65 @@ test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () =
   assert.match(body.prompt, /"real estate agency"/i);
 });
 
+test("Q1_TYPE_MANUAL does not revive deleted static aliases when D1 alias set is empty", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "real estate agency" }] },
+      { results: [] },
+      { results: [] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_20_manual_alias_deleted",
+      state: "Q1_TYPE_MANUAL",
+      answer: "realtor",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"realtor"/i);
+  assert.doesNotMatch(body.prompt, /real estate agency/i);
+});
+
+test("Q1_DESCRIBE heuristic fallback emits canonical plumbing company label", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "plumbing company" }] },
+      { results: [] },
+      { results: [] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_plumbing_heuristic",
+      state: "Q1_DESCRIBE",
+      answer: "we do drain cleaning and leak repair",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"plumbing company"/i);
+});
+
 test("debug business-types endpoint returns catalog, aliases, and memory counts", async () => {
   const db = createMockDb({
     allResponses: [
