@@ -1911,6 +1911,97 @@ test('Q2_CONFIRM_OWNERSHIP accepts natural reference phrasing like "one i like"'
   assert.match(body.prompt, /what do you like most about this site/i);
 });
 
+test('Q2_CONFIRM_OWNERSHIP accepts "this is my current website"', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://rootermanrenocarson.com/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+  const env = {
+    DB: db,
+    INSPECTOR: {
+      async fetch() {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            status: "done",
+            request_id: "scan_cur_phrase",
+            result: {
+              title: "Rooter Man",
+              h1: "Plumbing",
+              platform_hint: null,
+              emails: [],
+              phones: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      },
+    },
+  };
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_29d_current_sentence",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "this is my current website",
+    }),
+  });
+
+  const response = await worker.fetch(req, env);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+});
+
+test("Q2_CONFIRM_OWNERSHIP accepts \"it's just a site I like\"", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://divingcatalina.com/scuba-tours/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_29d_like_sentence",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "it's just a site I like",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q3_FEEDBACK_OPEN");
+});
+
+test('Q2_CONFIRM_OWNERSHIP accepts "not my site, just inspiration"', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://divingcatalina.com/scuba-tours/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_29d_inspiration_sentence",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "not my site, just inspiration",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q3_FEEDBACK_OPEN");
+});
+
 test("Q2_CONFIRM_OWNERSHIP yes on WordPress offers audit prompt without CTA buttons", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://wp-site.example/" }), "Q2_CONFIRM_OWNERSHIP");
   const db = createMockDb({

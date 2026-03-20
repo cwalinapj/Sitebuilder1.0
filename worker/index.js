@@ -1363,7 +1363,7 @@ ul { margin: 0; padding-left: 18px; }
       if (!t) return "unknown";
 
       if (
-        /\b(reference|inspiration|inspo|example|similar|like this|style reference|model it after|one i like|site i like|a site i like|not mine|isn'?t mine|is not mine|just one i like|one that i like)\b/.test(
+        /\b(reference|inspiration|inspo|example|similar|like this|style reference|model it after|one i like|site i like|a site i like|not mine|isn'?t mine|is not mine|just one i like|one that i like|just inspiration|not my site|its just a site i like|it'?s just a site i like)\b/.test(
           t
         )
       ) {
@@ -1371,7 +1371,7 @@ ul { margin: 0; padding-left: 18px; }
       }
 
       if (
-        /\b(current|my website|my site|my current site|that'?s mine|that is mine|it'?s mine|it is mine|yes|this is mine|my own site|my actual site)\b/.test(
+        /\b(current|my website|my site|my current site|that'?s mine|that is mine|it'?s mine|it is mine|yes|this is mine|my own site|my actual site|this is my current website|this is my website|this is our website)\b/.test(
           t
         )
       ) {
