@@ -2324,6 +2324,15 @@ ul { margin: 0; padding-left: 18px; }
       ) {
         return "law firm";
       }
+      if (/\b(mortgage broker|loan officer|mortgage company|home loan specialist)\b/.test(s)) {
+        return "mortgage broker";
+      }
+      if (/\b(property appraiser|real estate appraiser|property valuation)\b/.test(s)) {
+        return "real estate agency";
+      }
+      if (/\b(real estate photographer|property photographer|listing photographer)\b/.test(s)) {
+        return "photography studio";
+      }
       if (/\b(orthodontist|braces clinic|cosmetic dentist)\b/.test(s)) {
         return "dental office";
       }
@@ -2349,6 +2358,7 @@ ul { margin: 0; padding-left: 18px; }
     }
 
     function preferredBusinessTypePromptLabel(typeGuess, subtypeGuess, subtypeDisplayLabel) {
+      if (subtypeGuess && typeGuess) return `${subtypeDisplayLabel || subtypeGuess} under ${typeGuess}`;
       if (subtypeGuess) return subtypeDisplayLabel || subtypeGuess;
       return typeGuess;
     }

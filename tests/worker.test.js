@@ -983,7 +983,7 @@ test("Q1_DESCRIBE stores subtype when a canonical subtype match is found", async
 
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
-  assert.match(body.prompt, /"Pizzeria"/i);
+  assert.match(body.prompt, /"Pizzeria under restaurant"/i);
 
   const upsert = db.statements.find((s) => /INSERT INTO session_vars/.test(s.sql));
   assert.ok(upsert, "expected session_vars upsert");
@@ -1020,7 +1020,7 @@ test('Q1_DESCRIBE prefers legal specialty display label for "family lawyer"', as
 
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
-  assert.match(body.prompt, /"Family Law Firm"/i);
+  assert.match(body.prompt, /"Family Law Firm under law firm"/i);
 });
 
 test('Q1_DESCRIBE prefers medical specialty display label for "orthodontist"', async () => {
@@ -1052,7 +1052,71 @@ test('Q1_DESCRIBE prefers medical specialty display label for "orthodontist"', a
 
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
-  assert.match(body.prompt, /"Orthodontic Practice"/i);
+  assert.match(body.prompt, /"Orthodontic Practice under dental office"/i);
+});
+
+test('Q1_DESCRIBE prefers real-estate specialty display label for "property appraiser"', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "real estate agency" }] },
+      { results: [] },
+      { results: [] },
+      { results: [{ subtype_key: "property appraisal service", canonical_type: "real estate agency", display_label: "Property Appraisal Service", category: "finance_and_real_estate_specialties" }] },
+      { results: [{ alias_phrase: "property appraiser", subtype_key: "property appraisal service" }] },
+      { results: [{ id: 1, subtype_key: "property appraisal service", signal_type: "profession", value: "property appraiser", normalized_value: "property appraiser", weight: 4 }] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_property_appraiser",
+      state: "Q1_DESCRIBE",
+      answer: "I am a property appraiser",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"Property Appraisal Service under real estate agency"/i);
+});
+
+test('Q1_DESCRIBE prefers real-estate photography display label for "real estate photographer"', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "photography studio" }] },
+      { results: [] },
+      { results: [] },
+      { results: [{ subtype_key: "real estate photography", canonical_type: "photography studio", display_label: "Real Estate Photography", category: "finance_and_real_estate_specialties" }] },
+      { results: [{ alias_phrase: "real estate photographer", subtype_key: "real estate photography" }] },
+      { results: [{ id: 1, subtype_key: "real estate photography", signal_type: "profession", value: "real estate photographer", normalized_value: "real estate photographer", weight: 4 }] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_real_estate_photo",
+      state: "Q1_DESCRIBE",
+      answer: "I am a real estate photographer",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"Real Estate Photography under photography studio"/i);
 });
 
 test("Q1_DESCRIBE classifies `i own a <canonical>` across the static canonical catalog", async () => {
