@@ -901,6 +901,30 @@ test("Q1_DESCRIBE maps barber phrasing to the canonical barbershop label", async
   assert.match(body.prompt, /"barbershop"/i);
 });
 
+test("Q1_DESCRIBE maps pet store owner phrasing to the canonical pet store label", async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_pet_store",
+      state: "Q1_DESCRIBE",
+      answer: "sure i am a pet store owner",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"pet store"/i);
+});
+
 test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
   const db = createMockDb({

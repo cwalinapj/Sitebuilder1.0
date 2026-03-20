@@ -2049,6 +2049,8 @@ ul { margin: 0; padding-left: 18px; }
       if (/(gym|fitness center|fitness centre)/.test(s)) return "gym";
       if (/(yoga studio|yoga teacher|yoga instructor)/.test(s)) return "yoga studio";
       if (/(photographer|photography)/.test(s)) return "photography studio";
+      if (/(pet store|pet shop|pet supplies|pet food|dog supplies|cat toys|aquarium supplies)/.test(s))
+        return "pet store";
       if (/(detail|detailing|ceramic|car wash|clean cars|wash cars)/.test(s)) return "auto detailing";
       if (/(scuba|instructor|diving|snorkel|dive guide|dive guiding|dive shop|dive center|divemaster)/.test(s))
         return "dive services";
