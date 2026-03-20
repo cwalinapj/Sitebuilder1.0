@@ -22,10 +22,6 @@ binding = "AI"
 binding = "INSPECTOR"
 service = "sitebuilder-inspector"
 
-[[services]]
-binding = "PLUGIN_API"
-service = "plugin-api"
-
 [vars]
 # Optional fallback if service binding is unavailable in your environment.
 # Example: INSPECTOR_BASE_URL = "https://sitebuilder-inspector.<account>.workers.dev"

@@ -124,6 +124,7 @@ export default {
           method: request.method,
           headers,
           body: request.body,
+          duplex: request.body ? "half" : undefined,
           redirect: "manual",
         });
         upstreamResponse = await env.PLUGIN_API.fetch(upstreamRequest);
@@ -133,6 +134,7 @@ export default {
           method: request.method,
           headers,
           body: request.body,
+          duplex: request.body ? "half" : undefined,
           redirect: "manual",
         });
         upstreamResponse = await fetch(upstreamRequest);
@@ -626,10 +628,87 @@ export default {
         .slice(0, 220);
     }
 
+    function isTooVagueWebsiteIntent(text) {
+      const raw = normalizeWebsiteIntentText(text);
+      if (!raw) return true;
+
+      const lower = raw.toLowerCase();
+      if (raw.split(/\s+/).length <= 2 && /^(no|nope|nah|idk|i don't know|dont know|not sure|unsure|whatever|anything)$/i.test(lower)) {
+        return true;
+      }
+
+      if (
+        /^(no|nope|nah|idk|i don't know|dont know|not sure|unsure|whatever|anything|you pick|pick for me|show me examples|start picking)$/i.test(
+          lower
+        )
+      ) {
+        return true;
+      }
+
+      return false;
+    }
+
+    function wantsAutoPickedExamples(text) {
+      const raw = normalizeWebsiteIntentText(text).toLowerCase();
+      if (!raw) return false;
+      return /\b(pick examples|pick for me|start picking|show me examples|you pick|choose for me)\b/.test(raw);
+    }
+
+    function isSimpleGreeting(text) {
+      const raw = String(text || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[!?.,]+/g, "")
+        .trim();
+      return /^(hi|hello|hey|yo|hiya|good morning|good afternoon|good evening)$/.test(raw);
+    }
+
+    function isHelpSeekingOpener(text) {
+      const raw = String(text || "").trim().toLowerCase();
+      return (
+        /\b(can you help|help me|need help|looking for help|i need help)\b/.test(raw) ||
+        /^(help|support|assist)$/i.test(raw)
+      );
+    }
+
+    function isUncertainOpener(text) {
+      const raw = String(text || "").trim().toLowerCase();
+      return /\b(not sure|unsure|dont know|don't know|just looking|looking around|browsing|exploring)\b/.test(raw);
+    }
+
+    function isShortNegativeOpener(text) {
+      const raw = String(text || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[!?.,]+/g, "")
+        .trim();
+      return /^(no|nope|nah|not really)$/i.test(raw);
+    }
+
+    function prefersConversationFirst(text) {
+      const raw = String(text || "").trim().toLowerCase();
+      return (
+        /\b(just want to talk|talk first|chat first|ask questions first|plan it here|do it in chat|talk through it)\b/.test(raw) ||
+        /\b(before any demo|before a demo)\b/.test(raw)
+      );
+    }
+
+    function defersForNow(text) {
+      const raw = String(text || "").trim().toLowerCase();
+      return /\b(not right now|maybe later|later on|another time|not yet|no thanks)\b/.test(raw);
+    }
+
     function fallbackWebsiteIntentFocus(rawIntent, businessType) {
       const raw = normalizeWebsiteIntentText(rawIntent);
       const lower = raw.toLowerCase();
       const bt = String(businessType || "").toLowerCase();
+
+      if (/(web3|web 3|blockchain|crypto|solana|ethereum|evm|defi|smart contract)/.test(lower)) {
+        return "web3 developer portfolio and services website";
+      }
+      if (/(developer|development|engineer|programmer|coding|software)/.test(lower)) {
+        return "developer portfolio and services website";
+      }
 
       if (/(dive|scuba)/.test(lower) && /(guide|guiding|instruct|training|lesson|teach|tour)/.test(lower)) {
         return "dive guiding and scuba instruction service website";
@@ -808,8 +887,8 @@ export default {
           ok: true,
           next_state: "Q3_VIEWING_DEMO",
           prompt:
-            `We already moved to the reference site step. Open this link: ${demoUrl}\n\n` +
-            "Reply \"opened\" once you can view it.",
+            `We’re already at the reference-site step. Here’s the link again: ${demoUrl}\n\n` +
+            'Take a look when you can, then reply "opened" and I’ll keep going.',
           open_url: demoUrl,
           demo_url: demoUrl,
         };
@@ -1170,6 +1249,38 @@ ul { margin: 0; padding-left: 18px; }
       return "unknown";
     }
 
+    function classifyWebsiteRelation(answer) {
+      const t = String(answer || "").trim().toLowerCase();
+      if (!t) return "unknown";
+
+      if (/\b(reference|inspiration|inspo|example|similar|like this|style reference|model it after)\b/.test(t)) {
+        return "reference";
+      }
+
+      if (
+        /\b(current|my website|my site|my current site|that'?s mine|that is mine|it'?s mine|it is mine|yes)\b/.test(t)
+      ) {
+        return "current";
+      }
+
+      const yn = yesNoMaybe(t);
+      if (yn === "yes") return "current";
+      if (yn === "no") return "reference";
+      return "unknown";
+    }
+
+    function friendlyYesNoError(extra = "") {
+      return `A quick yes or no works here.${extra ? ` ${extra}` : ""}`;
+    }
+
+    function friendlyChoiceError(optionsText) {
+      return `Pick whichever fits best: ${optionsText}.`;
+    }
+
+    function friendlyPromptForText(example = "") {
+      return `Give me a short plain-English answer here.${example ? ` For example: ${example}` : ""}`;
+    }
+
     const MAX_ANSWER_CHARS = 1200;
 
     function normalizeBusinessPhrase(text) {
@@ -1423,6 +1534,12 @@ ul { margin: 0; padding-left: 18px; }
 
     function guessBusinessType(desc) {
       const s = (desc || "").toLowerCase();
+      if (/(web3|web 3|blockchain|crypto|solana|ethereum|evm|smart contract|dapp|dao|defi|nft)/.test(s)) {
+        return "web3 development";
+      }
+      if (/(developer|software|engineer|programmer|coding|build apps|build websites|web dev|web developer)/.test(s)) {
+        return "software development";
+      }
       if (/(detail|detailing|ceramic|car wash|clean cars|wash cars)/.test(s)) return "auto detailing";
       if (/(scuba|instructor|diving|snorkel|dive guide|dive guiding|dive shop|dive center|divemaster)/.test(s))
         return "dive services";
@@ -2812,26 +2929,26 @@ ul { margin: 0; padding-left: 18px; }
       const lines = [
         "WordPress audit summary",
         "",
-        "Your current scores (0-100):",
+        "Here’s the quick read on where things stand right now:",
         `- Speed (how fast your pages load): ${audit.speedScore}/100`,
         `- Security (how protected your site is): ${audit.securityScore}/100`,
         `- Schema (extra labels that help Google understand your business): ${audit.schemaScore}/100`,
         `- Reliability (how stable your links/pages are): ${audit.reliabilityScore}/100`,
         "",
-        "What I checked:",
+        "Here’s what I checked from the public side of the site:",
         `- Page size: ${pageSize} (${Number(scan?.raw_size || 0)} bytes)`,
         `- Public contact info found: ${emailsFound} email(s), ${phonesFound} phone number(s)`,
         `- Schema types found: ${schemaTypes}`,
         schemaTypes === 0
-          ? "- Why this matters: with 0 schema types, Google gets less structured detail about your business, which can lower rich results and local search visibility."
-          : "- Why this matters: schema helps search engines understand your business and services more accurately.",
+          ? "- Why this matters: with 0 schema types in place, Google gets less structured information about your business. That can make it harder to show up with rich results and stronger local search visibility."
+          : "- Why this matters: schema gives search engines clearer context about your business and services, which usually helps them understand your site more accurately.",
         "",
-        "Operational snapshot (public checks):",
-        "- What this means: a quick external health check from public pages only (no login required).",
+        "Public health check:",
+        "- This is a quick outside look using only what’s visible without logging in.",
         `- Broken links: ${asDisplay(audit.brokenLinks)}`,
         "",
-        "Admin-only checks (run after plugin install + connection):",
-        "- Plugin update status, comment moderation queue, and internal email queue are checked once the plugin is installed.",
+        "Checks that need plugin access:",
+        "- Plugin update status, comment moderation, and internal email queue data become available after the plugin is connected.",
       ];
 
       const infraLines = [];
@@ -2849,28 +2966,28 @@ ul { margin: 0; padding-left: 18px; }
         );
       }
       if (infraLines.length) {
-        lines.push("", "Infrastructure snapshot:", ...infraLines);
+        lines.push("", "What I can tell from the hosting and DNS side:", ...infraLines);
       }
       if (vendorSummary.length) {
-        lines.push("", `Third-party tools detected: ${vendorSummary.join(" | ")}`);
+        lines.push("", `Tools I could detect from the outside: ${vendorSummary.join(" | ")}`);
       }
       lines.push(
         "",
-        "Projected plugin lift (estimated point improvement):",
+        "If you install the plugin, here’s the improvement range I’d expect:",
         `- Speed: +${audit.projectedGains.speed.min} to +${audit.projectedGains.speed.max}`,
         `- Security: +${audit.projectedGains.security.min} to +${audit.projectedGains.security.max}`,
         `- Schema: +${audit.projectedGains.schema.min} to +${audit.projectedGains.schema.max}`,
         `- Reliability: +${audit.projectedGains.reliability.min} to +${audit.projectedGains.reliability.max}`,
         "",
-        "Estimated plugin impact: likely medium-to-high, especially for spam/form-abuse protection and safer updates.",
+        "My take: the plugin would likely help a fair amount here, especially with spam/form-abuse protection, safer updates, and filling in missing search-engine signals.",
         "",
-        "Top actions:",
+        "If I were prioritizing this, I’d start with:",
         ...topRecommendations.map((x) => `- ${x}`),
         "",
-        "What is SSO and why it helps:",
-        "- SSO means Single Sign-On: you log into wp-admin with one trusted account (like Google) instead of separate passwords.",
-        "- More secure: fewer passwords to steal/reuse, easier to enforce two-step verification, and faster access removal.",
-        "- Easier: fewer password resets and simpler team login management.",
+        "A quick note on SSO:",
+        "- SSO means Single Sign-On, so you log into wp-admin with one trusted account like Google instead of juggling separate passwords.",
+        "- It is more secure because there are fewer passwords to steal or reuse, and it is easier to enforce two-step verification.",
+        "- It is also easier day to day because it cuts down on password resets and makes team access simpler to manage.",
       );
 
       return lines.join("\n");
@@ -2897,11 +3014,11 @@ ul { margin: 0; padding-left: 18px; }
       return {
         prompt:
           `${auditPrompt}\n\n` +
-          "I saved your hosting/DNS and tool profile so we can personalize recommendations later.\n" +
-          'If you want me to build schema markup with you now, reply "schema setup" and I’ll ask a few quick questions.\n' +
-          "If you want, I can also guide Cloudflare Access SSO setup for wp-admin (single sign-on with Google/Facebook).\n" +
-          "You can use the AI-WebAdmin plugin to run watchdog checks, secure forms, automate updates, and take daily site snapshots/backups to help keep uptime as close to 99.99% as possible.\n" +
-          "This is all FREE!!!!\n" +
+          "I saved the hosting, DNS, and tool details I found so I can make better recommendations as we go.\n" +
+          'If you want, reply "schema setup" and I’ll walk you through the few details needed to add schema properly.\n' +
+          "If you want help with login security later, I can also guide Cloudflare Access SSO setup for wp-admin.\n" +
+          "The AI-WebAdmin plugin can watch for issues, secure forms, automate safer updates, and take daily snapshots/backups to help keep uptime as steady as possible.\n" +
+          "And yes, the starting version of this is free.\n" +
           buildAuditEmailOptInPrompt(),
         wordpress_audit: {
           speed_score: audit.speedScore,
@@ -4365,6 +4482,7 @@ ul { margin: 0; padding-left: 18px; }
           type_final: null,
           own_site_url: null,
           own_site_confirmed: null,
+          reference_site_url: null,
           site_platform: null,
           is_wordpress: false,
           happy_with_site_and_cost: null,
@@ -4684,8 +4802,8 @@ ul { margin: 0; padding-left: 18px; }
             ok: true,
             next_state: "Q3_VIEWING_DEMO",
             prompt:
-              `Understood — that one missed the mark. Try this example instead: ${nextSite.url}\n\n` +
-              "I’ll ask what you like/dislike in about 20 seconds.",
+              `That makes sense. Let’s try a better fit: ${nextSite.url}\n\n` +
+              "Take a quick look, and I’ll follow up in about 20 seconds.",
             open_url: nextSite.url,
             demo_url: nextSite.url,
             auto_advance_after_seconds: 20,
@@ -4731,8 +4849,8 @@ ul { margin: 0; padding-left: 18px; }
               ok: true,
               next_state: "Q3_VIEWING_DEMO",
               prompt:
-                `Thanks — I found a better match based on your feedback. Open this: ${freshSites[0].url}\n\n` +
-                "I’ll ask what you liked/disliked in about 20 seconds.",
+                `Thanks — this one should be closer to what you meant: ${freshSites[0].url}\n\n` +
+                "Give it a quick look, and I’ll check back in about 20 seconds.",
               open_url: freshSites[0].url,
               demo_url: freshSites[0].url,
               reference_sites: freshSites,
@@ -4904,7 +5022,39 @@ ul { margin: 0; padding-left: 18px; }
       // Q0
       if (state === "Q0_HELP_INTENT") {
         const intent = answerText.slice(0, 500);
-        if (!intent) return json({ ok: false, error: "Please tell me what you want help with today." }, 400);
+        if (!intent) return json({ ok: false, error: friendlyPromptForText("build me a website, audit my site, or help me sell a plugin") }, 400);
+
+        if (isSimpleGreeting(intent)) {
+          return await reply({
+            ok: true,
+            next_state: "Q1_DESCRIBE",
+            prompt: "Hi there. What kind of business, project, or website are you looking to build?",
+          });
+        }
+
+        if (isHelpSeekingOpener(intent)) {
+          return await reply({
+            ok: true,
+            next_state: "Q1_DESCRIBE",
+            prompt: "I can help with that. What are you trying to build, improve, or sell?",
+          });
+        }
+
+        if (isUncertainOpener(intent)) {
+          return await reply({
+            ok: true,
+            next_state: "Q1_DESCRIBE",
+            prompt: "That’s fine — we can figure it out together. Tell me a little about your business, project, or the kind of site you have in mind.",
+          });
+        }
+
+        if (isShortNegativeOpener(intent)) {
+          return await reply({
+            ok: true,
+            next_state: "Q1_DESCRIBE",
+            prompt: "No problem. When you’re ready, tell me what kind of business, project, or website you want help with.",
+          });
+        }
 
         const resolvedPath = await resolveHelpPath(intent);
         dependent.flow = dependent.flow || {};
@@ -4958,7 +5108,7 @@ ul { margin: 0; padding-left: 18px; }
       // Q1
       if (state === "Q1_DESCRIBE") {
         const desc = answerText.slice(0, 300);
-        if (!desc) return json({ ok: false, error: "Please describe your business briefly." }, 400);
+        if (!desc) return json({ ok: false, error: friendlyPromptForText("I run a web3 development studio") }, 400);
 
         independent.business.description_raw = desc;
         if (wantsWebsiteAuditFirst(desc)) {
@@ -4986,7 +5136,7 @@ ul { margin: 0; padding-left: 18px; }
             ok: true,
             next_state: "Q1_CHOOSE_TYPE",
             prompt:
-              "I found a few likely business types. Reply with 1, 2, or 3 (or type your exact business type):\n" +
+              "I found a few business types that seem close. Reply with 1, 2, or 3, or just type the exact one you want:\n" +
               `${numbered}`,
             candidates: resolved.candidates,
             source: resolved.source,
@@ -4996,7 +5146,7 @@ ul { margin: 0; padding-left: 18px; }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Just to confirm before I save this: I’m going to label your business type as "${dependent.draft.type_guess}". Is that correct?`,
+          prompt: `Based on what you said, the closest label looks like "${dependent.draft.type_guess}". Want me to use that?`,
           source: resolved.source,
         });
       }
@@ -5012,19 +5162,19 @@ ul { margin: 0; padding-left: 18px; }
         if (!picked) {
           picked = normalizeBusinessTypeLabel(answerText);
         }
-        if (!picked) return json({ ok: false, error: "Please choose 1/2/3 or type a business type." }, 400);
+        if (!picked) return json({ ok: false, error: friendlyChoiceError("1, 2, 3, or your exact business type") }, 400);
 
         dependent.draft.type_guess = picked;
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Just to confirm before I save this: I’m going to label your business type as "${picked}". Is that correct?`,
+          prompt: `Got it. The label I’d use is "${picked}". Want me to save it that way?`,
         });
       }
 
       if (state === "Q1_CONFIRM_TYPE") {
         const v = yesNoMaybe(answer);
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         if (v === "no") {
           const candidates = Array.isArray(dependent?.draft?.type_candidates) ? dependent.draft.type_candidates : [];
@@ -5033,11 +5183,11 @@ ul { margin: 0; padding-left: 18px; }
               ok: true,
               next_state: "Q1_CHOOSE_TYPE",
               prompt:
-                "No problem. Pick the correct type (1/2/3) or type your exact business type:\n" +
+                "No problem. Pick the one that fits best, or type your exact business type:\n" +
                 candidates.map((c, i) => `${i + 1}) ${c}`).join("\n"),
             });
           }
-          return await reply({ ok: true, next_state: "Q1_TYPE_MANUAL", prompt: "What should I label your business type as?" });
+          return await reply({ ok: true, next_state: "Q1_TYPE_MANUAL", prompt: "What would you like me to call your business type?" });
         }
 
         independent.business.type_final = normalizeBusinessTypeLabel(dependent.draft.type_guess);
@@ -5046,7 +5196,8 @@ ul { margin: 0; padding-left: 18px; }
         return await reply({
           ok: true,
           next_state: "Q2_PASTE_URL_OR_NO",
-          prompt: "Please paste your website URL so I can take a look (or reply “no website”).",
+          prompt:
+            "Please paste your website URL, a website you like, or reply “no website” if you do not have one yet.",
         });
       }
 
@@ -5058,7 +5209,7 @@ ul { margin: 0; padding-left: 18px; }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Just to confirm before I save this: I’m going to label your business type as "${t}". Is that correct?`,
+          prompt: `Okay, I can use "${t}" as your business type. Want me to save it that way?`,
         });
       }
 
@@ -5084,7 +5235,7 @@ ul { margin: 0; padding-left: 18px; }
             return await reply({
               ok: true,
               next_state: "Q2_SITE_INTENT_CONFIRM",
-              prompt: `Perfect — I’ll search examples for "${dependent.research.intent_draft}". Is that correct?`,
+              prompt: `I’m thinking of looking for examples around "${dependent.research.intent_draft}". Does that sound right?`,
             });
           }
           return await reply({
@@ -5096,7 +5247,7 @@ ul { margin: 0; padding-left: 18px; }
           });
         }
 
-        if (!foundUrl) return json({ ok: false, error: 'Please paste a URL or reply "no website".' }, 400);
+        if (!foundUrl) return json({ ok: false, error: 'Paste a website link here, or just say "no website".' }, 400);
 
         const u = toHttpsUrl(foundUrl);
         independent.business.own_site_url = u;
@@ -5105,40 +5256,56 @@ ul { margin: 0; padding-left: 18px; }
         return await reply({
           ok: true,
           next_state: "Q2_CONFIRM_OWNERSHIP",
-          prompt: `Thanks — I saved ${u}. I will review it in the background after you confirm. Is that your website?`,
+          prompt: `Thanks — I saved ${u}. Is that your current website, or just one you like as a reference?`,
         });
       }
 
       if (state === "Q2_SITE_INTENT") {
         const rawIntent = normalizeWebsiteIntentText(answerText);
+        const businessType = independent.business.type_final || dependent?.draft?.type_guess || "local business";
+        const locationHint = dependent?.research?.location_hint || geoToLocationText(independent?.person?.geo) || "";
+
         if (!rawIntent) {
           return json(
             {
               ok: false,
               error:
-                'Please describe the type of site you want (example: "dive guide website for Lake Tahoe tourists").',
+                'Please describe the kind of site you want, or say "pick examples for me". Example: "web3 developer portfolio with services and case studies".',
             },
             400
           );
         }
-        const businessType = independent.business.type_final || dependent?.draft?.type_guess || "local business";
-        const locationHint = dependent?.research?.location_hint || geoToLocationText(independent?.person?.geo) || "";
-        const resolved = await resolveWebsiteIntentFocus(rawIntent, businessType, locationHint);
+
+        let intentSeed = rawIntent;
+        if (wantsAutoPickedExamples(rawIntent)) {
+          intentSeed = `${businessType} website`;
+        } else if (isTooVagueWebsiteIntent(rawIntent)) {
+          return json(
+            {
+              ok: false,
+              error:
+                'Please describe the kind of site you want, or say "pick examples for me". Example: "web3 developer portfolio with services and case studies".',
+            },
+            400
+          );
+        }
+
+        const resolved = await resolveWebsiteIntentFocus(intentSeed, businessType, locationHint);
         dependent.research = dependent.research || {};
-        dependent.research.intent_raw = resolved.raw || rawIntent;
-        dependent.research.intent_draft = resolved.focus || rawIntent;
+        dependent.research.intent_raw = resolved.raw || intentSeed;
+        dependent.research.intent_draft = resolved.focus || intentSeed;
         dependent.research.intent_source = resolved.source || "user";
 
         return await reply({
           ok: true,
           next_state: "Q2_SITE_INTENT_CONFIRM",
-          prompt: `Perfect — I’ll search examples for "${dependent.research.intent_draft}". Is that correct?`,
+          prompt: `I’m thinking of looking for examples around "${dependent.research.intent_draft}". Does that sound right?`,
         });
       }
 
       if (state === "Q2_SITE_INTENT_CONFIRM") {
         const v = yesNoMaybe(answer);
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         if (v === "no") {
           dependent.research = dependent.research || {};
@@ -5146,7 +5313,7 @@ ul { margin: 0; padding-left: 18px; }
           return await reply({
             ok: true,
             next_state: "Q2_SITE_INTENT",
-            prompt: "No problem — tell me the type of website you want, in your own words.",
+            prompt: "No problem — tell me what kind of website you have in mind, in your own words.",
           });
         }
 
@@ -5164,18 +5331,28 @@ ul { margin: 0; padding-left: 18px; }
       }
 
       if (state === "Q2_CONFIRM_OWNERSHIP") {
-        const v = yesNoMaybe(answer);
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        const relation = classifyWebsiteRelation(answer);
+        if (relation === "unknown") {
+          return json({ ok: false, error: 'Reply with "current website" or "reference site".' }, 400);
+        }
 
-        independent.business.own_site_confirmed = (v === "yes");
-
-        if (v === "no") {
+        if (relation === "reference") {
+          const referenceUrl = toHttpsUrl(independent?.business?.own_site_url);
+          independent.business.reference_site_url = referenceUrl;
+          independent.business.own_site_confirmed = false;
+          dependent.research = dependent.research || {};
+          dependent.research.sites = referenceUrl ? [{ url: referenceUrl, title: "Reference site" }] : [];
+          dependent.research.current_site_index = 0;
+          if (referenceUrl) independent.demo.last_demo_url = referenceUrl;
           return await reply({
             ok: true,
-            next_state: "Q3_VIEW_EXAMPLES_YN",
-            prompt: "No problem — would you be willing to view a few example sites with me and tell me what you like or don’t like?",
+            next_state: "Q3_FEEDBACK_OPEN",
+            ...buildSiteFeedbackPrompt(referenceUrl ? { url: referenceUrl, title: "Reference site" } : null),
           });
         }
+
+        independent.business.reference_site_url = null;
+        independent.business.own_site_confirmed = true;
 
         // Immediately scan confirmed website to pull key contact variables.
         const targetUrl = bestScanTarget(independent);
@@ -5434,7 +5611,7 @@ ul { margin: 0; padding-left: 18px; }
 
       if (state === "Q_SCHEMA_CONFIRM") {
         const v = yesNoMaybe(answer);
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
         dependent.schema_setup = dependent.schema_setup || {};
         dependent.schema_setup.status = v === "yes" ? "ready" : "collecting";
         dependent.schema_setup.last_updated_at = now();
@@ -5505,7 +5682,7 @@ ul { margin: 0; padding-left: 18px; }
             prompt: "No worries — if you had to choose, would you say you're overall happy (yes) or not happy (no)?",
           });
         }
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no" (or "kinda").' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'A short "yes", "no", or "kinda" works here.' }, 400);
 
         independent.business.happy_with_site_and_cost = (v === "yes");
         await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
@@ -5552,7 +5729,7 @@ ul { margin: 0; padding-left: 18px; }
             });
           }
         }
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         independent.business.happy_with_site_and_cost = (v === "yes");
         await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
@@ -5587,6 +5764,16 @@ ul { margin: 0; padding-left: 18px; }
       // ===== VIEW EXAMPLES -> show link -> guided Qs =====
       if (state === "Q3_VIEW_EXAMPLES_YN") {
         const v = yesNoMaybe(answer);
+        const rawAnswer = String(answer || "");
+
+        if (prefersConversationFirst(rawAnswer)) {
+          return await reply({
+            ok: true,
+            next_state: "Q_CONTINUE_WITHOUT_DEMO_YN",
+            prompt:
+              "Absolutely — we can skip the example sites and just talk through the site together here in chat. Want to do that?",
+          });
+        }
 
         if (v === "scan") {
           if (dependent?.scan?.request_id) {
@@ -5657,7 +5844,7 @@ ul { margin: 0; padding-left: 18px; }
           });
         }
 
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         if (v === "no") {
           return await reply({
@@ -5714,8 +5901,8 @@ ul { margin: 0; padding-left: 18px; }
           ok: true,
           next_state: "Q3_VIEWING_DEMO",
           prompt:
-            `Awesome — I found a reference site${scopeLine}. Open this link in a new tab: ` +
-            `${demoUrl}\n\nBrowse for ~20–30 seconds, then come back and tell me when you’re ready.`,
+            `I found a reference site${scopeLine}: ${demoUrl}\n\n` +
+            "Open it in a new tab, take a quick look for 20-30 seconds, and then tell me when you're ready.",
           open_url: demoUrl,
           demo_url: demoUrl,
           reference_sites: sites,
@@ -5745,8 +5932,8 @@ ul { margin: 0; padding-left: 18px; }
             ok: true,
             next_state: "Q3_VIEWING_DEMO",
             prompt:
-              `No problem — use this link directly: ${demoUrl}\n\n` +
-              "If it doesn't open automatically, copy/paste it into a new tab. Reply \"opened\" when you can view it.",
+              `No problem — here’s the direct link again: ${demoUrl}\n\n` +
+              'If it didn’t open on its own, paste it into a new tab. Once you can see it, reply "opened".',
             open_url: demoUrl,
             demo_url: demoUrl,
           });
@@ -5757,8 +5944,8 @@ ul { margin: 0; padding-left: 18px; }
             ok: true,
             next_state: "Q3_VIEWING_DEMO",
             prompt:
-              `When you're ready, open this link: ${demoUrl}\n\n` +
-              "Reply \"opened\" once you've seen it for 20–30 seconds.",
+              `Take your time — here’s the link: ${demoUrl}\n\n` +
+              'After you’ve had a quick look, reply "opened" and I’ll keep going.',
             open_url: demoUrl,
             demo_url: demoUrl,
           });
@@ -5782,7 +5969,7 @@ ul { margin: 0; padding-left: 18px; }
             next_state: "Q3_VIEWING_DEMO",
             prompt:
               `Understood — try this direct link: ${demoUrl}\n\n` +
-              "Once it opens, reply \"opened\" and we’ll continue.",
+              'Once you can see it, reply "opened" and we’ll continue.',
             open_url: demoUrl,
             demo_url: demoUrl,
           });
@@ -5842,8 +6029,8 @@ ul { margin: 0; padding-left: 18px; }
             ok: true,
             next_state: "Q3_VIEWING_DEMO",
             prompt:
-              `No problem — open this link first: ${demoUrl}\n\n` +
-              "Reply \"opened\" once you can see it, then we’ll continue.",
+              `No problem — start with this link: ${demoUrl}\n\n` +
+              'Once it’s open, reply "opened" and I’ll keep going.',
             open_url: demoUrl,
             demo_url: demoUrl,
           });
@@ -5868,7 +6055,7 @@ ul { margin: 0; padding-left: 18px; }
 
         const modern = t.includes("modern");
         const bold = t.includes("bold");
-        if (!modern && !bold) return json({ ok: false, error: 'Please reply "modern" or "bold".' }, 400);
+        if (!modern && !bold) return json({ ok: false, error: friendlyChoiceError('"modern" or "bold"') }, 400);
 
         independent.demo.q1_vibe = modern ? "modern" : "bold";
         dependent.design = dependent.design || {};
@@ -5887,7 +6074,7 @@ ul { margin: 0; padding-left: 18px; }
       if (state === "Q3_DEMO_Q2") {
         const t = String(answer || "").trim().toLowerCase();
         const ok = /(too bright|too dark|just right)/.test(t);
-        if (!ok) return json({ ok: false, error: 'Please reply "too bright", "too dark", or "just right".' }, 400);
+        if (!ok) return json({ ok: false, error: friendlyChoiceError('"too bright", "too dark", or "just right"') }, 400);
 
         independent.demo.q2_colors = t.includes("bright") ? "too bright" : t.includes("dark") ? "too dark" : "just right";
         dependent.design = dependent.design || {};
@@ -5906,7 +6093,7 @@ ul { margin: 0; padding-left: 18px; }
       if (state === "Q3_DEMO_Q3") {
         const t = String(answer || "").trim().toLowerCase();
         const ok = /(easy to read|cluttered|too empty)/.test(t);
-        if (!ok) return json({ ok: false, error: 'Please reply "easy to read", "cluttered", or "too empty".' }, 400);
+        if (!ok) return json({ ok: false, error: friendlyChoiceError('"easy to read", "cluttered", or "too empty"') }, 400);
 
         independent.demo.q3_layout = t.includes("easy") ? "easy to read" : t.includes("clutter") ? "cluttered" : "too empty";
         dependent.design = dependent.design || {};
@@ -5925,7 +6112,7 @@ ul { margin: 0; padding-left: 18px; }
 
       if (state === "Q3_NEXT_REFERENCE_YN") {
         const v = yesNoMaybe(answer);
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         const sites = Array.isArray(dependent?.research?.sites) ? dependent.research.sites : [];
         const idxRaw = Number(dependent?.research?.current_site_index ?? 0);
@@ -5941,8 +6128,8 @@ ul { margin: 0; padding-left: 18px; }
             ok: true,
             next_state: "Q3_VIEWING_DEMO",
             prompt:
-              "Great — here’s the next reference site. Open this in a new tab: " +
-              `${nextSite.url}\n\nI’ll ask you what you like most in about 20 seconds.`,
+              `Here’s another one to compare: ${nextSite.url}\n\n` +
+              "Open it in a new tab, take a quick look, and I’ll ask what stands out in about 20 seconds.",
             open_url: nextSite.url,
             demo_url: nextSite.url,
             auto_advance_after_seconds: 20,
@@ -5968,7 +6155,7 @@ ul { margin: 0; padding-left: 18px; }
             prompt: "So I can come back with specific, actionable improvements instead of guessing. Want me to run the scan?",
           });
         }
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         independent.business.wants_site_scan = (v === "yes");
         await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
@@ -6055,6 +6242,7 @@ ul { margin: 0; padding-left: 18px; }
       // Build trial
       if (state === "Q_BUILD_TRIAL_YN") {
         const v = yesNoMaybe(answer);
+        const rawAnswer = String(answer || "");
 
         if (v === "howknow" || v === "why") {
           return await reply({
@@ -6065,31 +6253,84 @@ ul { margin: 0; padding-left: 18px; }
           });
         }
 
-        if (v === "maybe") {
-          const funnelSummary = buildFunnelCtaActions(dependent);
+        if (prefersConversationFirst(rawAnswer)) {
           return await reply({
             ok: true,
-            next_state: "DONE",
-            prompt: "No problem — we can skip the demo for now. If you want to move ahead with plugin setup, just reply \"plugin install\".",
-            funnel_stage: funnelSummary.stage,
-            upgrade_score: funnelSummary.score,
-            cta_actions: funnelSummary.actions,
+            next_state: "Q4_BIZNAME",
+            prompt:
+              'That works — we can plan it together here first. What’s your business name? If you don’t have one yet, type “none” and I’ll propose a few.',
           });
         }
 
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v === "maybe" || defersForNow(rawAnswer)) {
+          return await reply({
+            ok: true,
+            next_state: "Q_CONTINUE_WITHOUT_DEMO_YN",
+            prompt:
+              "No problem — we can skip the demo for now. Would you still like me to help plan the site with you here in chat?",
+          });
+        }
+
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         independent.business.wants_free_trial_build = (v === "yes");
         await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
 
         if (v === "no") {
-          return await reply({ ok: true, next_state: "DONE", prompt: "No problem. If you change your mind, come back anytime." });
+          return await reply({
+            ok: true,
+            next_state: "Q_CONTINUE_WITHOUT_DEMO_YN",
+            prompt:
+              "No problem — we can skip the demo. Would you still like me to help plan the site with you here in chat?",
+          });
         }
 
         return await reply({
           ok: true,
           next_state: "Q4_BIZNAME",
           prompt: 'What’s your business name? If you don’t have one yet, type “none” and I’ll propose a few.',
+        });
+      }
+
+      if (state === "Q_CONTINUE_WITHOUT_DEMO_YN") {
+        const v = yesNoMaybe(answer);
+        const rawAnswer = String(answer || "");
+
+        if (prefersConversationFirst(rawAnswer)) {
+          return await reply({
+            ok: true,
+            next_state: "Q4_BIZNAME",
+            prompt:
+              'Perfect — let’s talk it through. What’s your business name? If you don’t have one yet, type “none” and I’ll propose a few.',
+          });
+        }
+
+        if (v === "maybe") {
+          return await reply({
+            ok: true,
+            next_state: "Q_CONTINUE_WITHOUT_DEMO_YN",
+            prompt:
+              "That’s okay. If you want, we can keep it simple and just map out the homepage, sections, and tone together. Want to do that?",
+          });
+        }
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
+
+        if (v === "no") {
+          const funnelSummary = buildFunnelCtaActions(dependent);
+          return await reply({
+            ok: true,
+            next_state: "DONE",
+            prompt: "No problem. If you want help later, come back anytime.",
+            funnel_stage: funnelSummary.stage,
+            upgrade_score: funnelSummary.score,
+            cta_actions: funnelSummary.actions,
+          });
+        }
+
+        return await reply({
+          ok: true,
+          next_state: "Q4_BIZNAME",
+          prompt: 'Perfect — let’s keep going. What’s your business name? If you don’t have one yet, type “none” and I’ll propose a few.',
         });
       }
 
@@ -6171,7 +6412,7 @@ ul { margin: 0; padding-left: 18px; }
 
       if (state === "Q4_WEBSITE_CONFIRM") {
         const v = yesNoMaybe(answer);
-        if (v !== "yes" && v !== "no") return json({ ok: false, error: 'Please answer "yes" or "no".' }, 400);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
 
         if (v === "yes") {
           independent.business.own_site_url = independent.build.website_guess;
@@ -6227,7 +6468,7 @@ ul { margin: 0; padding-left: 18px; }
       // Location mode + address/service area
       if (state === "Q5_LOCATION_MODE") {
         const mode = parseLocationMode(answer);
-        if (!mode) return json({ ok: false, error: 'Please reply "1" (address) or "2" (service area).' }, 400);
+        if (!mode) return json({ ok: false, error: friendlyChoiceError('"1" for address or "2" for service area') }, 400);
 
         independent.build.location_mode = mode;
         await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);

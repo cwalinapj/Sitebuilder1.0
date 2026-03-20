@@ -95,6 +95,24 @@ function signPluginPayload(secret, timestamp, payload) {
   return createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
 }
 
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function createPluginApiStub(routeHandlers) {
+  return {
+    async fetch(request) {
+      const url = new URL(request.url);
+      const handler = routeHandlers[url.pathname];
+      assert.ok(handler, `No PLUGIN_API stub for ${url.pathname}`);
+      return handler(request, url);
+    },
+  };
+}
+
 test("q1/start rejects invalid first/last names", async () => {
   const db = createMockDb();
   const req = new Request("https://worker.example/q1/start", {
@@ -243,7 +261,8 @@ test("q1/start accepts verified turnstile token when configured", async () => {
 
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    assert.equal(body.next_state, "Q1_DESCRIBE");
+    assert.equal(body.next_state, "Q0_HELP_INTENT");
+    assert.match(body.prompt, /What can I help you with today/i);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -274,6 +293,106 @@ test("expensive actions are blocked when session is not security-verified", asyn
 
   assert.equal(response.status, 403);
   assert.equal(body.code, "SECURITY_VERIFICATION_REQUIRED");
+});
+
+test('Q0_HELP_INTENT turns "hello" into a friendly bridge prompt', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_hello",
+      state: "Q0_HELP_INTENT",
+      answer: "hello",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_DESCRIBE");
+  assert.match(body.prompt, /Hi there\./i);
+  assert.match(body.prompt, /business, project, or website/i);
+});
+
+test('Q0_HELP_INTENT turns "help me" into a helpful opener', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_help",
+      state: "Q0_HELP_INTENT",
+      answer: "can you help me",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_DESCRIBE");
+  assert.match(body.prompt, /I can help with that\./i);
+  assert.match(body.prompt, /trying to build, improve, or sell/i);
+});
+
+test('Q0_HELP_INTENT turns "not sure" into a collaborative prompt', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_unsure",
+      state: "Q0_HELP_INTENT",
+      answer: "not sure yet, just looking around",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_DESCRIBE");
+  assert.match(body.prompt, /we can figure it out together/i);
+  assert.match(body.prompt, /business, project, or the kind of site/i);
+});
+
+test('Q0_HELP_INTENT turns a short negative opener into a soft reset', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_no",
+      state: "Q0_HELP_INTENT",
+      answer: "nah",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_DESCRIBE");
+  assert.match(body.prompt, /When you.?re ready/i);
+  assert.match(body.prompt, /business, project, or website/i);
 });
 
 test("funnel status returns stage and CTA actions", async () => {
@@ -1050,9 +1169,130 @@ test('Q_BUILD_TRIAL_YN accepts "maybe later" without hard error', async () => {
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "DONE");
+  assert.equal(body.next_state, "Q_CONTINUE_WITHOUT_DEMO_YN");
   assert.match(body.prompt, /skip the demo for now/i);
-  assert.match(body.prompt, /plugin install/i);
+  assert.match(body.prompt, /help plan the site with you here in chat/i);
+});
+
+test('Q3_VIEW_EXAMPLES_YN treats "no thanks" as a natural decline and keeps moving', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q3_VIEW_EXAMPLES_YN");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q3_no_thanks",
+      state: "Q3_VIEW_EXAMPLES_YN",
+      answer: "no thanks",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q_BUILD_TRIAL_YN");
+  assert.match(body.prompt, /Would you still like me to build you a demo site/i);
+});
+
+test('Q3_VIEW_EXAMPLES_YN handles "I just want to talk first" without forcing examples', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q3_VIEW_EXAMPLES_YN");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q3_talk_first",
+      state: "Q3_VIEW_EXAMPLES_YN",
+      answer: "I just want to talk first",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q_CONTINUE_WITHOUT_DEMO_YN");
+  assert.match(body.prompt, /skip the example sites/i);
+  assert.match(body.prompt, /talk through the site together here in chat/i);
+});
+
+test('Q_BUILD_TRIAL_YN treats "not right now" as a natural defer', async () => {
+  const sessionRow = withExpectedState(buildSessionRow(), "Q_BUILD_TRIAL_YN");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_qbuild_not_now",
+      state: "Q_BUILD_TRIAL_YN",
+      answer: "not right now",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q_CONTINUE_WITHOUT_DEMO_YN");
+  assert.match(body.prompt, /skip the demo for now/i);
+});
+
+test('Q_BUILD_TRIAL_YN handles "I just want to talk first" as a planning request', async () => {
+  const sessionRow = withExpectedState(buildSessionRow(), "Q_BUILD_TRIAL_YN");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_qbuild_talk_first",
+      state: "Q_BUILD_TRIAL_YN",
+      answer: "I just want to talk first",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q4_BIZNAME");
+  assert.match(body.prompt, /we can plan it together here first/i);
+});
+
+test('Q_CONTINUE_WITHOUT_DEMO_YN handles "I just want to talk first" naturally', async () => {
+  const sessionRow = withExpectedState(buildSessionRow(), "Q_CONTINUE_WITHOUT_DEMO_YN");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_continue_talk_first",
+      state: "Q_CONTINUE_WITHOUT_DEMO_YN",
+      answer: "I just want to talk first",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q4_BIZNAME");
+  assert.match(body.prompt, /let.?s talk it through/i);
 });
 
 test("DONE follow-up request can recover email from scanned current site", async () => {
@@ -1296,6 +1536,75 @@ test('Q2_CONFIRM_OWNERSHIP accepts "yah" as yes and continues flow', async () =>
   assert.match(body.prompt, /I reviewed your current site/i);
 });
 
+test('Q2_CONFIRM_OWNERSHIP accepts "current website" and continues as an owned site', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://rootermanrenocarson.com/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+  const env = {
+    DB: db,
+    INSPECTOR: {
+      async fetch() {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            request_id: "scan_903c",
+            status: "done",
+            result: {
+              title: "Roto Rooter Reno Carson",
+              h1: "24/7 Plumbing",
+              emails: ["hello@rootermanrenocarson.com"],
+              phones: ["(775) 555-0100"],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      },
+    },
+  };
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_29c",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "current website",
+    }),
+  });
+
+  const response = await worker.fetch(req, env);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.match(body.prompt, /I reviewed your current site/i);
+});
+
+test('Q2_CONFIRM_OWNERSHIP accepts "reference site" and routes into reference feedback', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://brittanychiang.com/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_29d",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "reference site",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q3_FEEDBACK_OPEN");
+  assert.match(body.prompt, /what do you like most about this site/i);
+});
+
 test("Q2_CONFIRM_OWNERSHIP yes on WordPress offers audit prompt without CTA buttons", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://wp-site.example/" }), "Q2_CONFIRM_OWNERSHIP");
   const db = createMockDb({
@@ -1470,11 +1779,11 @@ test("Q2_WP_AUDIT_OFFER yes returns audit summary and continues", async () => {
   assert.equal(body.next_state, "Q2_AUDIT_EMAIL_OPTIN");
   assert.ok(body.wordpress_audit);
   assert.match(body.prompt, /WordPress audit summary/i);
-  assert.match(body.prompt, /Admin-only checks \(run after plugin install \+ connection\)/i);
+  assert.match(body.prompt, /Checks that need plugin access/i);
   assert.match(body.prompt, /broken links:\s*3/i);
-  assert.match(body.prompt, /with 0 schema types|schema helps search engines/i);
-  assert.match(body.prompt, /Projected plugin lift/i);
-  assert.match(body.prompt, /What is SSO and why it helps/i);
+  assert.match(body.prompt, /schema gives search engines clearer context|structured information about your business/i);
+  assert.match(body.prompt, /improvement range i.?d expect/i);
+  assert.match(body.prompt, /A quick note on SSO/i);
   assert.doesNotMatch(body.prompt, /Domain registrar/i);
   assert.ok(!("cta_actions" in body));
 });
@@ -1532,7 +1841,7 @@ test("Q2_WP_AUDIT_OFFER accepts natural-language request to run audit", async ()
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q2_AUDIT_EMAIL_OPTIN");
   assert.match(body.prompt, /WordPress audit summary/i);
-  assert.match(body.prompt, /Estimated plugin impact/i);
+  assert.match(body.prompt, /My take: the plugin would likely help/i);
 });
 
 test("Q2_AUDIT_EMAIL_OPTIN saves choices and continues to second part", async () => {
@@ -1601,7 +1910,12 @@ test("plugin/connect/start requires WordPress platform", async () => {
     body: JSON.stringify({ session_id: "ses_plugin_non_wp" }),
   });
 
-  const response = await worker.fetch(req, { DB: db });
+  const response = await worker.fetch(req, {
+    DB: db,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/connect/start": async () => jsonResponse({ ok: false, error: "WordPress sites only." }, 400),
+    }),
+  });
   const body = await response.json();
   assert.equal(response.status, 400);
   assert.match(body.error, /WordPress sites only/i);
@@ -1628,6 +1942,15 @@ test("plugin/connect/start returns connect_id and requirements for WordPress", a
     PLUGIN_FREE_URL: "https://plugin.example/free",
     TOLLDNS_URL: "https://tolldns.example/install",
     GITHUB_SIGNUP_URL: "https://github.com/signup",
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/connect/start": async () =>
+        jsonResponse({
+          ok: true,
+          connect_id: "plg_test_connect_1",
+          requirements: { tolldns_required_for_free: true },
+          cta_actions: [{ id: "install_tolldns_required" }],
+        }),
+    }),
   });
   const body = await response.json();
 
@@ -1675,7 +1998,13 @@ test("plugin/connect/verify requires TollDNS for free tier", async () => {
     }),
   });
 
-  const response = await worker.fetch(req, { DB: db });
+  const response = await worker.fetch(req, {
+    DB: db,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/connect/verify": async () =>
+        jsonResponse({ ok: false, error: "TollDNS installation is required for the free tier." }, 400),
+    }),
+  });
   const body = await response.json();
 
   assert.equal(response.status, 400);
@@ -1749,6 +2078,21 @@ test("plugin/connect/verify validates token and stores masked metadata", async (
       PLUGIN_FREE_URL: "https://plugin.example/free",
       TOLLDNS_URL: "https://tolldns.example/install",
       GITHUB_SIGNUP_URL: "https://github.com/signup",
+      PLUGIN_API: createPluginApiStub({
+        "/plugin/connect/verify": async () =>
+          jsonResponse({
+            ok: true,
+            plugin_connection: {
+              status: "connected",
+              token_verified: true,
+              tolldns_installed: true,
+              github_connected: true,
+              github_repo: "owner/sandbox-backups",
+              token_masked: "cf_test_...3456",
+            },
+            cta_actions: [{ id: "install_ai_webadmin_plugin" }],
+          }),
+      }),
     });
     const body = await response.json();
 
@@ -1808,13 +2152,17 @@ test("plugin/connect/verify rejects plaintext password fields", async () => {
   });
   const response = await worker.fetch(req, {
     DB: db,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/connect/verify": async () =>
+        jsonResponse({ ok: false, error: "Plaintext passwords are never collected." }, 400),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 400);
   assert.match(body.error, /plaintext passwords are never collected/i);
 });
 
-test("plugin/wp/comments/moderate rejects when shared secret is not configured", async () => {
+test("plugin paths return 503 when PLUGIN_API is not configured", async () => {
   const ts = String(Math.floor(Date.now() / 1000));
   const payload = JSON.stringify({
     site_url: "https://example.com",
@@ -1835,7 +2183,7 @@ test("plugin/wp/comments/moderate rejects when shared secret is not configured",
   const response = await worker.fetch(req, {});
   const body = await response.json();
   assert.equal(response.status, 503);
-  assert.match(body.error, /secret is not configured/i);
+  assert.match(body.error, /Plugin API forwarding is not configured/i);
 });
 
 test("plugin/wp/comments/moderate rejects invalid signature", async () => {
@@ -1858,6 +2206,9 @@ test("plugin/wp/comments/moderate rejects invalid signature", async () => {
 
   const response = await worker.fetch(req, {
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/comments/moderate": async () => jsonResponse({ ok: false, error: "Invalid plugin signature." }, 401),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 401);
@@ -1891,6 +2242,15 @@ test("plugin/wp/comments/moderate classifies obvious spam as spam or trash", asy
 
   const response = await worker.fetch(req, {
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/comments/moderate": async () =>
+        jsonResponse({
+          ok: true,
+          action: "spam",
+          wp_status: "spam",
+          heuristic: { score: 5 },
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -1969,6 +2329,30 @@ test("plugin/wp/audit/sync stores queue/update/moderation counts", async () => {
   const response = await worker.fetch(req, {
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/audit/sync": async () =>
+        jsonResponse({
+          ok: true,
+          audit_metrics: {
+            email_queue_count: 3,
+            outdated_plugin_count: 5,
+            inactive_plugin_count: 9,
+            redundant_plugin_count: 2,
+            sso_plugin_count: 0,
+            pending_comment_moderation_count: 8,
+            plugin_total_count: 20,
+            active_plugin_count: 11,
+            migration_plugin_count: 2,
+            unneeded_plugin_count: 7,
+            smtp_plugin_count: 1,
+            inactive_user_deleted_count: 4,
+            inactive_user_candidate_count: 10,
+            plugin_inventory: {
+              inactive_plugin_slugs: ["hello-dolly/hello.php"],
+            },
+          },
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -2046,6 +2430,24 @@ test("plugin/wp/access/profile stores access metadata with ssh key and encrypted
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
     CREDENTIAL_VAULT_KEY: "cred-vault-secret-1",
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/access/profile": async () =>
+        jsonResponse({
+          ok: true,
+          access_profile: {
+            control_panel_type: "cpanel",
+            panel_username: "owner_admin",
+            auth_preference: "ssh_key_only",
+            password_auth_disabled: true,
+            ssh_public_key_fingerprint: "sha256:testfingerprint",
+            provider_api_token_masked: "host_api_...6789",
+            free_vps_offer_eligible: true,
+            free_vps_offer_window_days: 30,
+            days_until_managed_hosting_expiry: 25,
+            server_hardware_hints: { visibility: "public_scan_limited" },
+          },
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -2098,6 +2500,19 @@ test("plugin/wp/email/forward/config stores forwarding profile for session", asy
   const response = await worker.fetch(req, {
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/email/forward/config": async () =>
+        jsonResponse({
+          ok: true,
+          email_forwarding: {
+            enabled: true,
+            forward_to_email: "owner@example.com",
+            has_mx_records: true,
+            email_provider_hint: "Google Workspace",
+            mx_record_count: 2,
+          },
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -2178,19 +2593,26 @@ test("plugin/wp/lead/forward stores lead event in R2 and sends webhook when conf
       CONVO_BUCKET: bucket,
       LEAD_FORWARD_WEBHOOK_URL: "https://hooks.example/lead",
       LEAD_FORWARD_WEBHOOK_SECRET: "hook-secret",
+      PLUGIN_API: createPluginApiStub({
+        "/plugin/wp/lead/forward": async () =>
+          jsonResponse({
+            ok: true,
+            forward_to_email: "owner@example.com",
+            stored_in_r2: true,
+            webhook: { attempted: true, ok: true, status: 202 },
+          }),
+      }),
     });
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.forward_to_email, "owner@example.com");
     assert.equal(body.stored_in_r2, true);
-    assert.equal(bucketPuts.length, 1);
-    assert.match(bucketPuts[0].key, /plugin-lead-forward\/ses_lead_forward_1\//);
+    assert.equal(bucketPuts.length, 0);
     assert.equal(body.webhook.attempted, true);
     assert.equal(body.webhook.ok, true);
     assert.equal(body.webhook.status, 202);
-    assert.equal(hookCalls.length, 1);
-    assert.equal(hookCalls[0].target, "https://hooks.example/lead");
+    assert.equal(hookCalls.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2243,6 +2665,17 @@ test("plugin/wp/schema/profile returns saved schema profile for session", async 
   const response = await worker.fetch(req, {
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/schema/profile": async () =>
+        jsonResponse({
+          ok: true,
+          schema_status: "ready",
+          schema_profile: {
+            business_name: "Supreme X Detail",
+          },
+          schema_jsonld: "{\"@type\":\"AutoDetailing\"}",
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -2299,6 +2732,15 @@ test("plugin/wp/redirects/profile returns normalized broken-link redirect paths"
   const response = await worker.fetch(req, {
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/redirects/profile": async () =>
+        jsonResponse({
+          ok: true,
+          checked_link_count: 22,
+          broken_link_count: 4,
+          redirect_paths: ["/old-page", "/dead-offer?x=1"],
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
@@ -2353,6 +2795,15 @@ test("plugin/wp/github/vault stores masked token and repo metadata", async () =>
       DB: db,
       WP_PLUGIN_SHARED_SECRET: secret,
       GITHUB_VAULT_KEY: "vault-key-1",
+      PLUGIN_API: createPluginApiStub({
+        "/plugin/wp/github/vault": async () =>
+          jsonResponse({
+            ok: true,
+            github_repo: "owner/repo",
+            github_user: "repo-owner",
+            token_masked: "ghp_exa...7890",
+          }),
+      }),
     });
     const body = await response.json();
     assert.equal(response.status, 200);
@@ -2422,11 +2873,19 @@ test("plugin/wp/backup/snapshot stores snapshot in R2 and degrades when github v
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
     CONVO_BUCKET: bucket,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/backup/snapshot": async () =>
+        jsonResponse({
+          ok: true,
+          message: "Snapshot saved to Cloudflare.",
+          github: { ok: false },
+        }),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(bucketPuts.length, 1);
+  assert.equal(bucketPuts.length, 0);
   assert.match(body.message, /saved to Cloudflare/i);
   assert.equal(body.github.ok, false);
 });
@@ -2466,6 +2925,10 @@ test("plugin/wp/auth/wallet/verify requires configured verification gateway", as
   const response = await worker.fetch(req, {
     DB: db,
     WP_PLUGIN_SHARED_SECRET: secret,
+    PLUGIN_API: createPluginApiStub({
+      "/plugin/wp/auth/wallet/verify": async () =>
+        jsonResponse({ ok: false, verified: false, error: "Wallet verification gateway not configured." }, 400),
+    }),
   });
   const body = await response.json();
   assert.equal(response.status, 400);
@@ -2532,6 +2995,15 @@ test("plugin/wp/auth/wallet/verify accepts webhook-verified wallet signature", a
       WP_PLUGIN_SHARED_SECRET: secret,
       WALLET_VERIFY_WEBHOOK: "https://wallet-verify.example/verify",
       WALLET_VERIFY_WEBHOOK_SECRET: "wallet-webhook-secret",
+      PLUGIN_API: createPluginApiStub({
+        "/plugin/wp/auth/wallet/verify": async () =>
+          jsonResponse({
+            ok: true,
+            verified: true,
+            wallet_address: "0x2222222222222222222222222222222222222222",
+            source: "test_wallet_gateway",
+          }),
+      }),
     });
     const body = await response.json();
     assert.equal(response.status, 200);
@@ -2742,7 +3214,7 @@ test("Q2_PASTE_URL_OR_NO saves URL without opening a browser tab", async () => {
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q2_CONFIRM_OWNERSHIP");
   assert.ok(!("open_url" in body));
-  assert.match(body.prompt, /I will review it in the background after you confirm/i);
+  assert.match(body.prompt, /current website, or just one you like as a reference/i);
 });
 
 test("Q2_SITE_INTENT captures and confirms desired website focus", async () => {
@@ -2766,7 +3238,8 @@ test("Q2_SITE_INTENT captures and confirms desired website focus", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q2_SITE_INTENT_CONFIRM");
-  assert.match(body.prompt, /I’ll search examples for/i);
+  assert.match(body.prompt, /looking for examples around/i);
+  assert.match(body.prompt, /Does that sound right/i);
 });
 
 test("Q2_SITE_INTENT_CONFIRM yes continues to examples step", async () => {

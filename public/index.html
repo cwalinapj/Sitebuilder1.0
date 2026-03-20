@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Sitebuilder Chat</title>
   <style>
-    body { font-family: system-ui; max-width: 780px; margin: 24px auto; padding: 0 12px; }
+    body { font-family: system-ui; max-width: 780px; margin: 24px auto; padding: 0 12px; background:#fbfbfb; color:#111; }
+    #startGate, #chatShell { border: 1px solid #ddd; border-radius: 16px; padding: 16px; background: #fff; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+    #startGate { margin-top: 16px; }
+    #chatShell { display:none; }
     #chat { border: 1px solid #ddd; border-radius: 12px; padding: 12px; height: 65vh; overflow:auto; background: #fff; }
     .msg { margin: 10px 0; white-space: pre-wrap; line-height: 1.35; }
     .ai { color: #111; }
@@ -25,21 +28,49 @@
     .ctaRow { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
     .ctaBtn { display:inline-block; padding:10px 12px; border-radius:10px; border:1px solid #111; text-decoration:none; color:#111; background:#fff; font-size:14px; }
     .ctaBtn.primary { background:#111; color:#fff; }
+    .subtle { color:#555; font-size:14px; line-height:1.45; }
+    .startGrid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin:14px 0 10px; }
+    .field { display:flex; flex-direction:column; gap:6px; }
+    .field label { font-size:13px; color:#444; }
+    .field input { width:100%; box-sizing:border-box; }
+    #startBtn { width:100%; background:#111; color:#fff; border-color:#111; }
+    #startError { display:none; margin-top:10px; color:#a22323; font-size:14px; }
+    @media (max-width: 640px) {
+      .startGrid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <h2>Sitebuilder Chat</h2>
-  <div id="chat"></div>
-
-  <div id="quickBar">
-    <button class="qr primary" id="btnYes" type="button">Yes</button>
-    <button class="qr" id="btnNo" type="button">No</button>
+  <div id="startGate">
+    <div class="subtle">Tell me your name to get started. After that, the chat will guide you step by step.</div>
+    <div class="startGrid">
+      <div class="field">
+        <label for="firstNameInput">First name</label>
+        <input id="firstNameInput" placeholder="Paul" autocomplete="given-name"/>
+      </div>
+      <div class="field">
+        <label for="lastNameInput">Last name</label>
+        <input id="lastNameInput" placeholder="Cwalina" autocomplete="family-name"/>
+      </div>
+    </div>
+    <button id="startBtn" type="button">Start chat</button>
+    <div id="startError"></div>
   </div>
 
-  <form id="form">
-    <input id="input" placeholder="Type here..." autocomplete="off"/>
-    <button type="submit" id="sendBtn">Send</button>
-  </form>
+  <div id="chatShell">
+    <div id="chat"></div>
+
+    <div id="quickBar">
+      <button class="qr primary" id="btnYes" type="button">Yes</button>
+      <button class="qr" id="btnNo" type="button">No</button>
+    </div>
+
+    <form id="form">
+      <input id="input" placeholder="Type here..." autocomplete="off"/>
+      <button type="submit" id="sendBtn">Send</button>
+    </form>
+  </div>
   <div id="turnstileMount" style="display:none;"></div>
 
   <script>
@@ -48,6 +79,12 @@
     let sessionId = null;
     let state = null;
 
+    const startGate = document.getElementById("startGate");
+    const chatShell = document.getElementById("chatShell");
+    const firstNameInput = document.getElementById("firstNameInput");
+    const lastNameInput = document.getElementById("lastNameInput");
+    const startBtn = document.getElementById("startBtn");
+    const startError = document.getElementById("startError");
     const chat = document.getElementById("chat");
     const input = document.getElementById("input");
     const form = document.getElementById("form");
@@ -187,6 +224,7 @@
 
     function shouldShowYesNoButtons(aiText) {
       const t = String(aiText || "").toLowerCase();
+      if (t.includes("current website") || t.includes("reference")) return false;
       const patterns = [
         "is that correct",
         "is that your website",
@@ -211,6 +249,14 @@
       sendBtn.disabled = isPending;
       btnYes.disabled = isPending;
       btnNo.disabled = isPending;
+      startBtn.disabled = isPending;
+      firstNameInput.disabled = isPending;
+      lastNameInput.disabled = isPending;
+    }
+
+    function showStartError(message) {
+      startError.textContent = message;
+      startError.style.display = message ? "block" : "none";
     }
 
     async function loadSecurityConfig() {
@@ -373,23 +419,13 @@
       }
     });
 
-    async function start() {
-      const firstName = (prompt("First Name?") || "").trim();
-      const lastName  = (prompt("Last Name?") || "").trim();
-
-      if (!firstName || !lastName) {
-        addMsg("ai", "Please refresh and enter both First Name and Last Name to begin.");
-        input.disabled = true; sendBtn.disabled = true;
-        return;
-      }
-
+    async function start(firstName, lastName) {
       await loadSecurityConfig();
       let turnstileToken = null;
       try {
         turnstileToken = await ensureTurnstileToken();
       } catch (error) {
-        addMsg("ai", "Security check failed. Please refresh and try again.");
-        input.disabled = true; sendBtn.disabled = true;
+        showStartError("Security check failed. Refresh and try again.");
         return;
       }
 
@@ -401,18 +437,44 @@
 
       const data = await r.json();
       if (!data.ok) {
-        addMsg("ai", "Start error: " + (data.error || "unknown"));
-        input.disabled = true; sendBtn.disabled = true;
+        showStartError(data.error || "I could not start the chat.");
         return;
       }
 
       sessionId = data.session_id;
       state = data.next_state;
-
+      showStartError("");
+      startGate.style.display = "none";
+      chatShell.style.display = "block";
       addMsg("ai", data.prompt);
       setYesNoUI(shouldShowYesNoButtons(data.prompt));
       input.focus();
     }
+
+    startBtn.addEventListener("click", async () => {
+      if (pendingRequest) return;
+      const firstName = firstNameInput.value.trim();
+      const lastName = lastNameInput.value.trim();
+      if (!firstName || !lastName) {
+        showStartError("Enter both your first and last name to begin.");
+        return;
+      }
+
+      setRequestPending(true);
+      try {
+        await start(firstName, lastName);
+      } catch {
+        showStartError("I could not start the chat right now. Refresh and try again.");
+      } finally {
+        setRequestPending(false);
+      }
+    });
+
+    lastNameInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      startBtn.click();
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -435,7 +497,6 @@
       }
     });
 
-    start();
   </script>
 </body>
 </html>
