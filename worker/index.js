@@ -2284,7 +2284,7 @@ ul { margin: 0; padding-left: 18px; }
         ["flower shop", /\b(florist|flowers|bouquets|arrangements|wedding flowers|flower delivery)\b/],
         ["bookstore", /\b(bookstore|book store|books|novels|used books|bookshop)\b/],
         ["electronics store", /\b(electronics|gadgets|computers|phones|tech accessories|devices)\b/],
-        ["pet store", /\b(pet store|pet shop|pet supplies|pet food|dog supplies|cat toys|aquarium supplies)\b/],
+        ["pet store", /\b(pet store|pet shop|pet supplies|pet food|dog supplies|cat toys|aquarium supplies|tropical fish|fish store|aquarium store)\b/],
         ["furniture store", /\b(furniture|sofas|tables|chairs|home furnishings|showroom)\b/],
         ["gift shop", /\b(gift shop|gifts|souvenirs|novelty items|local gifts)\b/],
         ["grocery store", /\b(grocery|supermarket|produce|pantry|food market|organic grocery)\b/],
@@ -2397,7 +2397,7 @@ ul { margin: 0; padding-left: 18px; }
       if (/(gym|fitness center|fitness centre)/.test(s)) return "gym";
       if (/(yoga studio|yoga teacher|yoga instructor)/.test(s)) return "yoga studio";
       if (/(photographer|photography)/.test(s)) return "photography studio";
-      if (/(pet store|pet shop|pet supplies|pet food|dog supplies|cat toys|aquarium supplies)/.test(s))
+      if (/(pet store|pet shop|pet supplies|pet food|dog supplies|cat toys|aquarium supplies|tropical fish|fish store|aquarium store)/.test(s))
         return "pet store";
       if (/(detail|detailing|ceramic|car wash|clean cars|wash cars)/.test(s)) return "auto detailing";
       if (/(scuba|instructor|diving|snorkel|dive guide|dive guiding|dive shop|dive center|divemaster)/.test(s))
@@ -2473,6 +2473,30 @@ ul { margin: 0; padding-left: 18px; }
       const mentionsAudit =
         /\b(audit|review|scan|analy[sz]e|check\w*|check\s*up|performance|speed|security|schema|seo)\b/.test(t);
       return mentionsSite && mentionsAudit;
+    }
+
+    function extractBusinessDescriptionFromHelpIntent(text) {
+      const raw = String(text || "").trim();
+      if (!raw) return null;
+      const normalized = raw.toLowerCase().replace(/\s+/g, " ").trim();
+      const patterns = [
+        /\b(?:build|make|create|design)\s+(?:me\s+)?(?:a\s+)?(?:website|site)\s+(?:for|about)\s+(.+)$/i,
+        /\b(?:i(?:\s+would)?(?:\s+like)?\s+to\s+)?(?:build|make|create|design)\s+(?:a\s+)?(?:website|site)\s+(?:for|about)\s+(.+)$/i,
+        /\b(?:i\s+want|i\s+need|help\s+me)\s+(?:a\s+)?(?:website|site)\s+(?:for|about)\s+(.+)$/i,
+      ];
+      for (const re of patterns) {
+        const match = raw.match(re);
+        if (match?.[1]) {
+          const extracted = match[1].replace(/[.?!]\s*$/, "").trim();
+          if (extracted && !/^(me|myself|it|this)$/i.test(extracted)) return extracted;
+        }
+      }
+      if (/\b(?:website|site)\b/.test(normalized) && /\bfor my\b/.test(normalized)) {
+        const idx = normalized.indexOf("for my");
+        const extracted = raw.slice(idx + 4).replace(/^my\s+/i, "").replace(/[.?!]\s*$/, "").trim();
+        if (extracted) return extracted;
+      }
+      return null;
     }
 
     function fallbackHelpPath(text) {
@@ -6356,6 +6380,87 @@ ul { margin: 0; padding-left: 18px; }
       }
 
       // Q0
+      async function beginBusinessDescriptionFlow(desc, sourceTag = "describe") {
+        const description = String(desc || "").slice(0, 300);
+        if (!description) return json({ ok: false, error: friendlyPromptForText("I run a web3 development studio") }, 400);
+
+        independent.business.description_raw = description;
+        const inferredLocation = extractLocationFromBusinessDescription(description);
+        if (inferredLocation) {
+          independent.build.service_area = inferredLocation;
+          dependent.research = dependent.research || {};
+          dependent.research.location_hint = inferredLocation;
+        }
+        if (wantsWebsiteAuditFirst(description)) {
+          dependent.flow = dependent.flow || {};
+          dependent.flow.audit_requested = true;
+          dependent.draft.type_candidates = [];
+          dependent.draft.type_source = "audit_intent";
+          dependent.draft.type_guess = dependent.draft.type_guess || null;
+          return await reply({
+            ok: true,
+            next_state: "Q2_PASTE_URL_OR_NO",
+            prompt:
+              "Absolutely — I can run a website audit first. Please paste your website URL so I can review it headlessly (or reply “no website”).",
+          });
+        }
+
+        const resolved = await resolveBusinessTypeCandidates(description);
+        dependent.draft.type_candidates = resolved.candidates;
+        dependent.draft.type_source = sourceTag === "embedded_q0" ? `${resolved.source}_from_help_intent` : resolved.source;
+        dependent.draft.type_guess = resolved.candidates[0] || "local business";
+        dependent.draft.subtype_guess = null;
+        dependent.draft.subtype_source = null;
+        dependent.draft.subtype_confidence = null;
+        dependent.draft.subtype_evidence = [];
+        dependent.draft.subtype_display_label = null;
+        if (resolved.classification) {
+          dependent.draft.type_confidence = resolved.classification.confidence;
+          dependent.draft.type_evidence = resolved.classification.evidence;
+          if (!independent.build.service_area && resolved.classification.location) {
+            independent.build.service_area = resolved.classification.location;
+          }
+          if ((!dependent.research || !dependent.research.location_hint) && resolved.classification.location) {
+            dependent.research = dependent.research || {};
+            dependent.research.location_hint = resolved.classification.location;
+          }
+        }
+        if (dependent.draft.type_guess) {
+          const subtypeResolved = await resolveBusinessSubtype(description, dependent.draft.type_guess);
+          if (subtypeResolved?.subtype_key) {
+            dependent.draft.subtype_guess = subtypeResolved.subtype_key;
+            dependent.draft.subtype_source = subtypeResolved.source;
+            dependent.draft.subtype_confidence = subtypeResolved.confidence;
+            dependent.draft.subtype_evidence = subtypeResolved.evidence;
+            dependent.draft.subtype_display_label = subtypeResolved.display_label || subtypeResolved.subtype_key;
+          }
+        }
+
+        if ((resolved.candidates || []).length > 1) {
+          const numbered = resolved.candidates.map((c, i) => `${i + 1}) ${c}`).join("\n");
+          return await reply({
+            ok: true,
+            next_state: "Q1_CHOOSE_TYPE",
+            prompt:
+              "I found a few business types that seem close. Reply with 1, 2, or 3, or just type the exact one you want:\n" +
+              `${numbered}`,
+            candidates: resolved.candidates,
+            source: resolved.source,
+          });
+        }
+
+        return await reply({
+          ok: true,
+          next_state: "Q1_CONFIRM_TYPE",
+          prompt: `Based on what you said, the closest label looks like "${preferredBusinessTypePromptLabel(
+            dependent.draft.type_guess,
+            dependent.draft.subtype_guess,
+            dependent.draft.subtype_display_label
+          )}". Want me to use that?`,
+          source: resolved.source,
+        });
+      }
+
       if (state === "Q0_HELP_INTENT") {
         const intent = answerText.slice(0, 500);
         if (!intent) return json({ ok: false, error: friendlyPromptForText("build me a website, audit my site, or help me sell a plugin") }, 400);
@@ -6418,6 +6523,11 @@ ul { margin: 0; padding-left: 18px; }
           });
         }
 
+        const embeddedBusiness = extractBusinessDescriptionFromHelpIntent(intent);
+        if (embeddedBusiness) {
+          return await beginBusinessDescriptionFlow(embeddedBusiness, "embedded_q0");
+        }
+
         return await reply({
           ok: true,
           next_state: "Q1_DESCRIBE",
@@ -6446,84 +6556,7 @@ ul { margin: 0; padding-left: 18px; }
 
       // Q1
       if (state === "Q1_DESCRIBE") {
-        const desc = answerText.slice(0, 300);
-        if (!desc) return json({ ok: false, error: friendlyPromptForText("I run a web3 development studio") }, 400);
-
-        independent.business.description_raw = desc;
-        const inferredLocation = extractLocationFromBusinessDescription(desc);
-        if (inferredLocation) {
-          independent.build.service_area = inferredLocation;
-          dependent.research = dependent.research || {};
-          dependent.research.location_hint = inferredLocation;
-        }
-        if (wantsWebsiteAuditFirst(desc)) {
-          dependent.flow = dependent.flow || {};
-          dependent.flow.audit_requested = true;
-          dependent.draft.type_candidates = [];
-          dependent.draft.type_source = "audit_intent";
-          dependent.draft.type_guess = dependent.draft.type_guess || null;
-          return await reply({
-            ok: true,
-            next_state: "Q2_PASTE_URL_OR_NO",
-            prompt:
-              "Absolutely — I can run a website audit first. Please paste your website URL so I can review it headlessly (or reply “no website”).",
-          });
-        }
-
-        const resolved = await resolveBusinessTypeCandidates(desc);
-        dependent.draft.type_candidates = resolved.candidates;
-        dependent.draft.type_source = resolved.source;
-        dependent.draft.type_guess = resolved.candidates[0] || "local business";
-        dependent.draft.subtype_guess = null;
-        dependent.draft.subtype_source = null;
-        dependent.draft.subtype_confidence = null;
-        dependent.draft.subtype_evidence = [];
-        dependent.draft.subtype_display_label = null;
-        if (resolved.classification) {
-          dependent.draft.type_confidence = resolved.classification.confidence;
-          dependent.draft.type_evidence = resolved.classification.evidence;
-          if (!independent.build.service_area && resolved.classification.location) {
-            independent.build.service_area = resolved.classification.location;
-          }
-          if ((!dependent.research || !dependent.research.location_hint) && resolved.classification.location) {
-            dependent.research = dependent.research || {};
-            dependent.research.location_hint = resolved.classification.location;
-          }
-        }
-        if (dependent.draft.type_guess) {
-          const subtypeResolved = await resolveBusinessSubtype(desc, dependent.draft.type_guess);
-          if (subtypeResolved?.subtype_key) {
-            dependent.draft.subtype_guess = subtypeResolved.subtype_key;
-            dependent.draft.subtype_source = subtypeResolved.source;
-            dependent.draft.subtype_confidence = subtypeResolved.confidence;
-            dependent.draft.subtype_evidence = subtypeResolved.evidence;
-            dependent.draft.subtype_display_label = subtypeResolved.display_label || subtypeResolved.subtype_key;
-          }
-        }
-
-        if ((resolved.candidates || []).length > 1) {
-          const numbered = resolved.candidates.map((c, i) => `${i + 1}) ${c}`).join("\n");
-          return await reply({
-            ok: true,
-            next_state: "Q1_CHOOSE_TYPE",
-            prompt:
-              "I found a few business types that seem close. Reply with 1, 2, or 3, or just type the exact one you want:\n" +
-              `${numbered}`,
-            candidates: resolved.candidates,
-            source: resolved.source,
-          });
-        }
-
-        return await reply({
-          ok: true,
-          next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Based on what you said, the closest label looks like "${preferredBusinessTypePromptLabel(
-            dependent.draft.type_guess,
-            dependent.draft.subtype_guess,
-            dependent.draft.subtype_display_label
-          )}". Want me to use that?`,
-          source: resolved.source,
-        });
+        return await beginBusinessDescriptionFlow(answerText, "describe");
       }
 
       if (state === "Q1_CHOOSE_TYPE") {

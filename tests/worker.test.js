@@ -425,6 +425,39 @@ test('Q0_HELP_INTENT turns a short negative opener into a soft reset', async () 
   assert.match(body.prompt, /business, project, or website/i);
 });
 
+test('Q0_HELP_INTENT extracts embedded business description from website request', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "pet store" }] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_tropical_fish_store",
+      state: "Q0_HELP_INTENT",
+      answer: "i would like to build a website for my tropical fish store",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"pet store"/i);
+  assert.doesNotMatch(body.prompt, /briefly describe your business/i);
+});
+
 test("funnel status returns stage and CTA actions", async () => {
   const row = buildSessionRow({ ownSiteUrl: null });
   const independent = JSON.parse(row.independent_json);
