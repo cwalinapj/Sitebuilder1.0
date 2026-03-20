@@ -517,6 +517,44 @@ test('Q0_HELP_INTENT carries embedded location into service area when present', 
   assert.match(dependentJson, /"location_hint":"reno"/i);
 });
 
+test('Q0_HELP_INTENT extracts self-promo business description from website request', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "dive services" }] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_scuba_self_promo",
+      state: "Q0_HELP_INTENT",
+      answer: "can you build me a scuba diving website for myself that promotes me as a tour guide in lake tahoe?",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /dive services/i);
+  assert.doesNotMatch(body.prompt, /briefly describe your business/i);
+
+  const upsert = db.statements.find((s) => /INSERT INTO session_vars/.test(s.sql));
+  assert.ok(upsert, "expected session_vars upsert");
+  const independentJson = String(upsert.params[2] || "");
+  assert.match(independentJson, /"description_raw":"scuba diving tour guide in lake tahoe"/i);
+});
+
 test("funnel status returns stage and CTA actions", async () => {
   const row = buildSessionRow({ ownSiteUrl: null });
   const independent = JSON.parse(row.independent_json);

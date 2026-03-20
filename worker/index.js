@@ -2693,15 +2693,31 @@ ul { margin: 0; padding-left: 18px; }
       const raw = String(text || "").trim();
       if (!raw) return null;
       const normalized = raw.toLowerCase().replace(/\s+/g, " ").trim();
+      const leadingDomainMatch = raw.match(/\b(?:build|make|create|design)\s+(?:me\s+)?(.+?)\s+(?:website|site)\b/i);
+      const leadingDomain = leadingDomainMatch?.[1]
+        ? leadingDomainMatch[1].replace(/^\s*(?:a|an|the)\s+/i, "").replace(/\b(?:a|an|the)\s+$/i, "").trim()
+        : null;
       const patterns = [
         /\b(?:build|make|create|design)\s+(?:me\s+)?(?:a\s+)?(?:website|site)\s+(?:for|about)\s+(.+)$/i,
         /\b(?:i(?:\s+would)?(?:\s+like)?\s+to\s+)?(?:build|make|create|design)\s+(?:a\s+)?(?:website|site)\s+(?:for|about)\s+(.+)$/i,
         /\b(?:i\s+want|i\s+need|help\s+me)\s+(?:a\s+)?(?:website|site)\s+(?:for|about)\s+(.+)$/i,
+        /\b(?:build|make|create|design)\s+(?:me\s+)?(?:a\s+)?(?:website|site)\s+for\s+(?:me|myself)\s+that\s+(?:promotes?|positions?|shows?)\s+me\s+as\s+(.+)$/i,
+        /\b(?:can you|could you)\s+(?:build|make|create|design)\s+(?:me\s+)?(?:a\s+)?(?:website|site)\s+for\s+(?:me|myself)\s+that\s+(?:promotes?|positions?|shows?)\s+me\s+as\s+(.+)$/i,
       ];
       for (const re of patterns) {
         const match = raw.match(re);
         if (match?.[1]) {
           const extracted = match[1].replace(/[.?!]\s*$/, "").trim();
+          if (extracted && !/^(me|myself|it|this)$/i.test(extracted)) return extracted;
+        }
+      }
+      {
+        const selfPromo = raw.match(/\b(?:for\s+(?:me|myself).{0,60}\b(?:promotes?|positions?|shows?)\s+me\s+as\s+)(.+)$/i);
+        if (selfPromo?.[1]) {
+          let extracted = selfPromo[1].replace(/[.?!]\s*$/, "").trim().replace(/^(?:a|an|the)\s+/i, "");
+          if (leadingDomain && !new RegExp(`\\b${leadingDomain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(extracted)) {
+            extracted = `${leadingDomain} ${extracted}`.trim();
+          }
           if (extracted && !/^(me|myself|it|this)$/i.test(extracted)) return extracted;
         }
       }
