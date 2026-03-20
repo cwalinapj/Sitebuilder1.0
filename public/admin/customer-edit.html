@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Customer Editor</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --panel: #fff;
+      --ink: #152238;
+      --muted: #64748b;
+      --line: #d8e1ee;
+      --accent: #155eef;
+      --accent-ink: #fff;
+      --danger: #a92c2c;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: linear-gradient(180deg, #f8fafd 0%, #eef3fa 100%); color: var(--ink); }
+    .shell { max-width: 1120px; margin: 0 auto; padding: 28px 18px 56px; }
+    .hero { display:flex; justify-content:space-between; gap:18px; align-items:end; margin-bottom:18px; }
+    h1 { margin:0; font-size:34px; }
+    .subtle { color: var(--muted); margin-top:10px; line-height:1.5; max-width:780px; }
+    .toplink { color: var(--accent); text-decoration:none; font-weight:600; }
+    .layout { display:grid; grid-template-columns: 330px 1fr; gap:18px; }
+    .card { background: var(--panel); border:1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: 0 12px 30px rgba(21, 34, 56, 0.06); }
+    .card h2 { margin:0 0 14px; font-size:18px; }
+    .field { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    label { font-size:13px; color: var(--muted); }
+    input, textarea, select, button { font: inherit; }
+    input, textarea, select { width:100%; padding:12px 13px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); }
+    textarea { min-height: 180px; resize: vertical; }
+    button { border:0; border-radius:12px; padding:12px 14px; background: var(--accent); color: var(--accent-ink); font-weight:600; cursor:pointer; }
+    button.secondary { background:#fff; color:var(--ink); border:1px solid var(--line); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .status { min-height:18px; margin-top:8px; color:var(--muted); font-size:13px; }
+    .status.error { color: var(--danger); }
+    .pill { display:inline-block; border-radius:999px; padding:6px 10px; border:1px solid var(--line); color:var(--muted); font-size:12px; margin:0 8px 8px 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+    pre { margin:0; white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.5; }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } .hero { flex-direction:column; align-items:start; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <div>
+        <h1>Customer Editor</h1>
+        <div class="subtle">Load one customer record, review linked identities and sessions, then update consent flags or internal notes.</div>
+      </div>
+      <a class="toplink" href="/admin/customers.html">Back to customer list</a>
+    </div>
+
+    <div class="layout">
+      <div class="card">
+        <h2>Load Customer</h2>
+        <div class="field">
+          <label for="workerBase">Worker base URL</label>
+          <input id="workerBase" value="https://sitebuilder-agent.96psxbzqk2.workers.dev"/>
+        </div>
+        <div class="field">
+          <label for="adminToken">Admin bearer token</label>
+          <input id="adminToken" type="password" placeholder="ADMIN_TOKEN"/>
+        </div>
+        <div class="field">
+          <label for="customerId">Customer ID</label>
+          <input id="customerId" placeholder="cus_..."/>
+        </div>
+        <button id="loadBtn" type="button">Load customer</button>
+        <div id="loadStatus" class="status"></div>
+      </div>
+
+      <div class="card">
+        <h2>Profile</h2>
+        <div id="profileMeta" class="subtle">Load a customer to begin.</div>
+        <div id="identityWrap" style="margin-top:14px;"></div>
+        <div id="sessionWrap" style="margin-top:10px;"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Edit Consent and Notes</h2>
+      <div class="row">
+        <div class="field">
+          <label for="consentTraining">Training consent</label>
+          <select id="consentTraining">
+            <option value="null">Unset</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="consentFollowup">Follow-up consent</label>
+          <select id="consentFollowup">
+            <option value="null">Unset</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="consentMarketing">Marketing consent</label>
+          <select id="consentMarketing">
+            <option value="null">Unset</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="notes">Internal notes</label>
+          <textarea id="notes" placeholder="Add internal notes about this customer."></textarea>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button id="saveBtn" type="button">Save changes</button>
+        <button id="reloadBtn" class="secondary" type="button">Reload</button>
+      </div>
+      <div id="saveStatus" class="status"></div>
+      <div style="margin-top:16px;">
+        <h2 style="font-size:16px; margin:0 0 10px;">Raw payload</h2>
+        <pre id="rawPayload">{}</pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const workerBase = document.getElementById("workerBase");
+    const adminToken = document.getElementById("adminToken");
+    const customerId = document.getElementById("customerId");
+    const loadBtn = document.getElementById("loadBtn");
+    const saveBtn = document.getElementById("saveBtn");
+    const reloadBtn = document.getElementById("reloadBtn");
+    const loadStatus = document.getElementById("loadStatus");
+    const saveStatus = document.getElementById("saveStatus");
+    const profileMeta = document.getElementById("profileMeta");
+    const identityWrap = document.getElementById("identityWrap");
+    const sessionWrap = document.getElementById("sessionWrap");
+    const rawPayload = document.getElementById("rawPayload");
+    const consentTraining = document.getElementById("consentTraining");
+    const consentFollowup = document.getElementById("consentFollowup");
+    const consentMarketing = document.getElementById("consentMarketing");
+    const notes = document.getElementById("notes");
+
+    let currentCustomer = null;
+
+    function qs() {
+      return new URLSearchParams(window.location.search);
+    }
+
+    function setStatus(el, message, isError = false) {
+      el.textContent = message || "";
+      el.className = isError ? "status error" : "status";
+    }
+
+    function baseAndToken() {
+      return {
+        base: String(workerBase.value || "").trim().replace(/\/+$/, ""),
+        token: String(adminToken.value || "").trim(),
+      };
+    }
+
+    function parseSelectValue(value) {
+      if (value === "true") return true;
+      if (value === "false") return false;
+      return null;
+    }
+
+    function selectFromMaybeBool(el, value) {
+      el.value = value === 1 || value === true ? "true" : value === 0 || value === false ? "false" : "null";
+    }
+
+    async function loadCustomer() {
+      const { base, token } = baseAndToken();
+      const id = String(customerId.value || "").trim();
+      if (!base) return setStatus(loadStatus, "Worker base URL is required.", true);
+      if (!token) return setStatus(loadStatus, "Admin bearer token is required.", true);
+      if (!id) return setStatus(loadStatus, "Customer ID is required.", true);
+
+      loadBtn.disabled = true;
+      setStatus(loadStatus, "Loading customer...");
+      try {
+        const response = await fetch(`${base}/admin/customers/${encodeURIComponent(id)}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        const payload = await response.json().catch(() => ({ ok: false, error: "invalid_json" }));
+        rawPayload.textContent = JSON.stringify(payload, null, 2);
+        if (!response.ok) {
+          currentCustomer = null;
+          setStatus(loadStatus, payload.error || `Request failed (${response.status})`, true);
+          return;
+        }
+
+        currentCustomer = payload.customer;
+        profileMeta.innerHTML = `
+          <div><strong>${payload.customer.first_name || ""} ${payload.customer.last_name || ""}</strong></div>
+          <div class="mono">${payload.customer.customer_id}</div>
+          <div>${payload.customer.email || payload.customer.wallet_address || "No primary identity"}</div>
+          <div>${payload.customer.business_name || payload.customer.business_type || "Unknown business"}</div>
+        `;
+        identityWrap.innerHTML = `<div>${(payload.identities || []).map((item) => `<span class="pill">${item.identity_type}: ${item.identity_value}</span>`).join("") || "<span class='pill'>No identities</span>"}</div>`;
+        sessionWrap.innerHTML = `<div>${(payload.sessions || []).map((item) => `<span class="pill">${item.session_id}</span>`).join("") || "<span class='pill'>No linked sessions</span>"}</div>`;
+        selectFromMaybeBool(consentTraining, payload.customer.consent_training);
+        selectFromMaybeBool(consentFollowup, payload.customer.consent_followup);
+        selectFromMaybeBool(consentMarketing, payload.customer.consent_marketing);
+        notes.value = payload.customer.notes || "";
+        setStatus(loadStatus, "Customer loaded.");
+      } catch (error) {
+        setStatus(loadStatus, "Network request failed.", true);
+      } finally {
+        loadBtn.disabled = false;
+      }
+    }
+
+    async function saveCustomer() {
+      const { base, token } = baseAndToken();
+      const id = String(customerId.value || "").trim();
+      if (!base) return setStatus(saveStatus, "Worker base URL is required.", true);
+      if (!token) return setStatus(saveStatus, "Admin bearer token is required.", true);
+      if (!id) return setStatus(saveStatus, "Customer ID is required.", true);
+
+      const body = {
+        consent_training: parseSelectValue(consentTraining.value),
+        consent_followup: parseSelectValue(consentFollowup.value),
+        consent_marketing: parseSelectValue(consentMarketing.value),
+        notes: String(notes.value || ""),
+      };
+
+      saveBtn.disabled = true;
+      setStatus(saveStatus, "Saving...");
+      try {
+        const response = await fetch(`${base}/admin/customers/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json().catch(() => ({ ok: false, error: "invalid_json" }));
+        if (!response.ok) {
+          setStatus(saveStatus, payload.error || `Save failed (${response.status})`, true);
+          return;
+        }
+        setStatus(saveStatus, "Saved.");
+        await loadCustomer();
+      } catch (error) {
+        setStatus(saveStatus, "Network request failed.", true);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    loadBtn.addEventListener("click", loadCustomer);
+    reloadBtn.addEventListener("click", loadCustomer);
+    saveBtn.addEventListener("click", saveCustomer);
+
+    const qsId = qs().get("customer_id");
+    if (qsId) customerId.value = qsId;
+  </script>
+</body>
+</html>

@@ -1833,6 +1833,90 @@ test("admin customer lookup returns customer by wallet", async () => {
   assert.equal(body.query.wallet, "137:0xabc123");
 });
 
+test("admin customer list supports search and pagination", async () => {
+  const db = createMockDb({
+    firstResponses: [{ total: 3 }],
+    allResponses: [
+      {
+        results: [
+          { customer_id: "cus_1", email: "owner@example.com", business_name: "Blue Reef Dive", last_active_at: 10 },
+          { customer_id: "cus_2", email: "shop@example.com", business_name: "Reef Shop", last_active_at: 9 },
+        ],
+      },
+    ],
+  });
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers?q=reef&limit=2&offset=0", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.total, 3);
+  assert.equal(body.items.length, 2);
+  assert.equal(body.query.q, "reef");
+  assert.equal(body.query.limit, 2);
+});
+
+test("admin customer detail returns identities and sessions", async () => {
+  const db = createMockDb({
+    firstResponses: [
+      { customer_id: "cus_9", email: "owner@example.com", notes: "VIP" },
+    ],
+    allResponses: [
+      { results: [{ identity_type: "email", identity_value: "owner@example.com", source: "onboarding_email" }] },
+      { results: [{ session_id: "ses_1", linked_at: 123, linkage_source: "identity_match" }] },
+    ],
+  });
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers/cus_9", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.customer.customer_id, "cus_9");
+  assert.equal(body.identities.length, 1);
+  assert.equal(body.sessions.length, 1);
+});
+
+test("admin customer patch updates consent flags and notes", async () => {
+  const db = createMockDb({
+    firstResponses: [
+      { customer_id: "cus_42", consent_training: 1, consent_followup: 1, consent_marketing: 0, notes: null },
+    ],
+  });
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers/cus_42", {
+      method: "PATCH",
+      headers: {
+        authorization: "Bearer expected-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        consent_training: false,
+        consent_marketing: true,
+        notes: "Asked for follow-up in April.",
+      }),
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.customer_id, "cus_42");
+  const updateStmt = db.statements.find((x) => x.op === "run" && /UPDATE customers/i.test(x.sql));
+  assert.ok(updateStmt);
+  assert.equal(updateStmt.params[0], 0);
+  assert.equal(updateStmt.params[2], 1);
+  assert.equal(updateStmt.params[3], "Asked for follow-up in April.");
+  assert.ok(db.statements.some((x) => x.op === "run" && /INSERT INTO admin_audit_log/i.test(x.sql)));
+});
+
 test("Q1_DESCRIBE uses D1 signal evidence to classify family lawyer correctly", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
   const db = createMockDb({

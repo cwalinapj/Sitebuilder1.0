@@ -48,6 +48,13 @@ Supported query params:
 Internal admin page:
 
 - [customers.html](/Users/root1/Sitebuilder1.0/public/admin/customers.html)
+- [customer-edit.html](/Users/root1/Sitebuilder1.0/public/admin/customer-edit.html)
+
+Additional admin routes:
+
+- `GET /admin/customers`
+- `GET /admin/customers/:customer_id`
+- `PATCH /admin/customers/:customer_id`
 
 Example:
 
@@ -69,6 +76,9 @@ The following tests pass in [worker.test.js](/Users/root1/Sitebuilder1.0/tests/w
 - `admin customer lookup returns customer by email`
 - `admin customer lookup returns customer by session_id`
 - `admin customer lookup returns customer by wallet`
+- `admin customer list supports search and pagination`
+- `admin customer detail returns identities and sessions`
+- `admin customer patch updates consent flags and notes`
 
 Test command:
 

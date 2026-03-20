@@ -3,163 +3,102 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Customer Lookup</title>
+  <title>Customers Admin</title>
   <style>
     :root {
-      --bg: #f5f7fb;
-      --panel: #ffffff;
-      --ink: #162033;
-      --muted: #65728a;
-      --line: #d7dfec;
-      --accent: #145af2;
-      --accent-ink: #ffffff;
-      --danger: #a12d2d;
+      --bg: #f4f7fb;
+      --panel: #fff;
+      --ink: #152238;
+      --muted: #64748b;
+      --line: #d8e1ee;
+      --accent: #155eef;
+      --accent-ink: #fff;
+      --soft: #eef4ff;
+      --danger: #a92c2c;
       --radius: 16px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: linear-gradient(180deg, #f7f9fd 0%, #eef3fb 100%);
       color: var(--ink);
+      background: linear-gradient(180deg, #f8fafd 0%, #eef3fa 100%);
     }
-    .shell {
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 32px 18px 56px;
-    }
-    .hero {
-      margin-bottom: 18px;
-    }
-    .eyebrow {
-      font-size: 12px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-    h1 {
-      margin: 0;
-      font-size: 34px;
-      line-height: 1.05;
-    }
-    .subtle {
-      margin-top: 12px;
-      max-width: 760px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: 360px 1fr;
-      gap: 18px;
-      align-items: start;
-    }
+    .shell { max-width: 1220px; margin: 0 auto; padding: 28px 18px 56px; }
+    .hero { display:flex; justify-content:space-between; gap:18px; align-items:end; margin-bottom:18px; }
+    h1 { margin:0; font-size:34px; line-height:1.02; }
+    .subtle { color: var(--muted); max-width: 760px; line-height: 1.5; margin-top: 10px; }
+    .toplink { color: var(--accent); text-decoration: none; font-weight: 600; }
+    .layout { display:grid; grid-template-columns: 330px 1fr; gap: 18px; }
     .card {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       padding: 18px;
-      box-shadow: 0 14px 34px rgba(21, 33, 59, 0.06);
+      box-shadow: 0 12px 30px rgba(21, 34, 56, 0.06);
     }
-    .card h2 {
-      margin: 0 0 14px;
-      font-size: 18px;
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 12px;
-    }
-    label {
-      font-size: 13px;
-      color: var(--muted);
-    }
-    input, select, button, textarea {
-      font: inherit;
-    }
+    .card h2 { margin: 0 0 14px; font-size: 18px; }
+    .field { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    label { font-size: 13px; color: var(--muted); }
+    input, select, button { font: inherit; }
     input, select {
       width: 100%;
+      padding: 12px 13px;
       border: 1px solid var(--line);
       border-radius: 12px;
-      padding: 12px 13px;
       background: #fff;
       color: var(--ink);
     }
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
     button {
-      width: 100%;
       border: 0;
       border-radius: 12px;
-      padding: 13px 14px;
+      padding: 12px 14px;
       background: var(--accent);
       color: var(--accent-ink);
       font-weight: 600;
       cursor: pointer;
     }
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    .hint {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 8px;
-      line-height: 1.45;
-    }
-    .status {
-      min-height: 20px;
-      margin-top: 10px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .status.error {
-      color: var(--danger);
-    }
-    pre {
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .resultHeader {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .pill {
-      border-radius: 999px;
-      padding: 6px 10px;
+    button.secondary {
+      background: #fff;
+      color: var(--ink);
       border: 1px solid var(--line);
-      font-size: 12px;
-      color: var(--muted);
     }
-    @media (max-width: 900px) {
-      .grid { grid-template-columns: 1fr; }
+    button:disabled { opacity: 0.6; cursor:not-allowed; }
+    .status { min-height: 18px; margin-top: 8px; color: var(--muted); font-size: 13px; }
+    .status.error { color: var(--danger); }
+    .toolbar { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom: 12px; }
+    .pill { border-radius:999px; padding:6px 10px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { text-align:left; padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    tr:hover td { background: #fbfdff; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .soft { display:inline-block; padding: 4px 8px; border-radius: 999px; background: var(--soft); color: #24437e; font-size: 12px; }
+    .pagination { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-top: 14px; }
+    .actions { display:flex; gap:8px; }
+    .empty { color: var(--muted); padding: 18px 4px; }
+    .consents { display:flex; gap:6px; flex-wrap:wrap; }
+    .linkbtn { color: var(--accent); text-decoration: none; font-weight: 600; }
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      .hero { flex-direction: column; align-items: start; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
     <div class="hero">
-      <div class="eyebrow">Internal Admin</div>
-      <h1>Customer Lookup</h1>
-      <div class="subtle">
-        Query durable customer profiles by email, wallet, or session lineage. This page only works with a valid admin bearer token and calls the worker lookup endpoint directly.
+      <div>
+        <h1>Customers Admin</h1>
+        <div class="subtle">Search recent durable customer profiles, paginate through active records, and jump into per-customer editing for consent flags and notes.</div>
       </div>
+      <a class="toplink" href="/admin/customer-edit.html">Open Customer Editor</a>
     </div>
 
-    <div class="grid">
+    <div class="layout">
       <div class="card">
-        <h2>Lookup</h2>
+        <h2>Filters</h2>
         <div class="field">
           <label for="workerBase">Worker base URL</label>
           <input id="workerBase" value="https://sitebuilder-agent.96psxbzqk2.workers.dev"/>
@@ -169,121 +108,194 @@
           <input id="adminToken" type="password" placeholder="ADMIN_TOKEN"/>
         </div>
         <div class="field">
-          <label for="lookupType">Lookup type</label>
-          <select id="lookupType">
-            <option value="email">Email</option>
-            <option value="wallet">Wallet</option>
-            <option value="session_id">Session ID</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="lookupValue">Lookup value</label>
-          <input id="lookupValue" placeholder="owner@example.com"/>
+          <label for="searchInput">Search</label>
+          <input id="searchInput" placeholder="email, wallet, business name, type"/>
         </div>
         <div class="row">
           <div class="field">
-            <label for="walletChain">Wallet chain ID</label>
-            <input id="walletChain" type="number" value="0"/>
+            <label for="recentDays">Recent days</label>
+            <select id="recentDays">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="0">All time</option>
+            </select>
           </div>
           <div class="field">
-            <label for="projectHint">Project</label>
-            <input id="projectHint" value="sitebuilder-agent" disabled/>
+            <label for="pageSize">Page size</label>
+            <select id="pageSize">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
           </div>
         </div>
-        <button id="lookupBtn" type="button">Run lookup</button>
-        <div class="hint">
-          Wallet lookups use the worker’s normalized wallet format, so include the correct chain id when you use wallet mode.
-        </div>
+        <button id="runSearch" type="button">Load customers</button>
         <div id="status" class="status"></div>
       </div>
 
       <div class="card">
-        <div class="resultHeader">
-          <h2>Result</h2>
-          <div id="countPill" class="pill">0 matches</div>
+        <div class="toolbar">
+          <h2 style="margin:0;">Results</h2>
+          <div id="summary" class="pill">0 total</div>
         </div>
-        <pre id="result">{}</pre>
+        <div style="overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Business</th>
+                <th>Consent</th>
+                <th>Last Active</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr><td class="empty" colspan="5">No results loaded yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <div id="pageMeta" class="pill">Page 1</div>
+          <div class="actions">
+            <button id="prevBtn" class="secondary" type="button">Previous</button>
+            <button id="nextBtn" class="secondary" type="button">Next</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
-    const lookupType = document.getElementById("lookupType");
-    const lookupValue = document.getElementById("lookupValue");
-    const walletChain = document.getElementById("walletChain");
-    const adminToken = document.getElementById("adminToken");
     const workerBase = document.getElementById("workerBase");
-    const lookupBtn = document.getElementById("lookupBtn");
+    const adminToken = document.getElementById("adminToken");
+    const searchInput = document.getElementById("searchInput");
+    const recentDays = document.getElementById("recentDays");
+    const pageSize = document.getElementById("pageSize");
+    const runSearch = document.getElementById("runSearch");
     const statusEl = document.getElementById("status");
-    const resultEl = document.getElementById("result");
-    const countPill = document.getElementById("countPill");
+    const resultsBody = document.getElementById("resultsBody");
+    const summary = document.getElementById("summary");
+    const pageMeta = document.getElementById("pageMeta");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+
+    let total = 0;
+    let offset = 0;
 
     function setStatus(message, isError = false) {
       statusEl.textContent = message || "";
       statusEl.className = isError ? "status error" : "status";
     }
 
-    function setResult(payload) {
-      const count = Array.isArray(payload?.items) ? payload.items.length : Number(payload?.count || 0);
-      countPill.textContent = `${count} match${count === 1 ? "" : "es"}`;
-      resultEl.textContent = JSON.stringify(payload, null, 2);
+    function fmtTs(raw) {
+      const n = Number(raw || 0);
+      if (!Number.isFinite(n) || n <= 0) return "Unknown";
+      try { return new Date(n).toLocaleString(); } catch { return String(raw); }
     }
 
-    function currentPlaceholder() {
-      switch (lookupType.value) {
-        case "wallet":
-          return "0x1234... or wallet public key";
-        case "session_id":
-          return "ses_...";
-        default:
-          return "owner@example.com";
+    function consentBadge(label, value) {
+      const text = value === 1 ? `${label}: yes` : value === 0 ? `${label}: no` : `${label}: unset`;
+      return `<span class="soft">${text}</span>`;
+    }
+
+    function renderRows(items) {
+      const rows = Array.isArray(items) ? items : [];
+      if (!rows.length) {
+        resultsBody.innerHTML = '<tr><td class="empty" colspan="5">No matching customers.</td></tr>';
+        return;
       }
+      resultsBody.innerHTML = rows.map((item) => `
+        <tr>
+          <td>
+            <div><strong>${item.first_name || ""} ${item.last_name || ""}</strong></div>
+            <div class="mono">${item.customer_id || ""}</div>
+            <div>${item.email || item.wallet_address || "No primary identity"}</div>
+          </td>
+          <td>
+            <div><strong>${item.business_name || item.business_type || "Unknown business"}</strong></div>
+            <div>${[item.business_type, item.business_subtype].filter(Boolean).join(" / ") || "No classification yet"}</div>
+            <div>${item.service_area || ""}</div>
+          </td>
+          <td>
+            <div class="consents">
+              ${consentBadge("Training", item.consent_training)}
+              ${consentBadge("Follow-up", item.consent_followup)}
+              ${consentBadge("Marketing", item.consent_marketing)}
+            </div>
+          </td>
+          <td>${fmtTs(item.last_active_at)}</td>
+          <td><a class="linkbtn" href="/admin/customer-edit.html?customer_id=${encodeURIComponent(item.customer_id)}">Edit</a></td>
+        </tr>
+      `).join("");
     }
 
-    lookupType.addEventListener("change", () => {
-      lookupValue.placeholder = currentPlaceholder();
-    });
-
-    lookupBtn.addEventListener("click", async () => {
+    async function loadCustomers() {
       const base = String(workerBase.value || "").trim().replace(/\/+$/, "");
       const token = String(adminToken.value || "").trim();
-      const type = lookupType.value;
-      const value = String(lookupValue.value || "").trim();
-      const chainId = String(walletChain.value || "0").trim();
-
+      const q = String(searchInput.value || "").trim();
+      const limit = String(pageSize.value || "20");
+      const days = String(recentDays.value || "30");
       if (!base) return setStatus("Worker base URL is required.", true);
       if (!token) return setStatus("Admin bearer token is required.", true);
-      if (!value) return setStatus("Lookup value is required.", true);
 
-      const params = new URLSearchParams();
-      params.set(type, value);
-      if (type === "wallet") params.set("wallet_chain_id", chainId || "0");
+      const params = new URLSearchParams({ limit, offset: String(offset) });
+      if (q) params.set("q", q);
+      if (days) params.set("recent_days", days);
 
-      lookupBtn.disabled = true;
-      setStatus("Running lookup...");
-
+      runSearch.disabled = true;
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+      setStatus("Loading customers...");
       try {
-        const response = await fetch(`${base}/admin/customers/lookup?${params.toString()}`, {
-          headers: {
-            authorization: `Bearer ${token}`,
-          },
+        const response = await fetch(`${base}/admin/customers?${params.toString()}`, {
+          headers: { authorization: `Bearer ${token}` },
         });
         const payload = await response.json().catch(() => ({ ok: false, error: "invalid_json" }));
-        setResult(payload);
         if (!response.ok) {
-          setStatus(payload?.error || `Lookup failed (${response.status})`, true);
-        } else {
-          setStatus("Lookup complete.");
+          renderRows([]);
+          setStatus(payload.error || `Request failed (${response.status})`, true);
+          summary.textContent = "0 total";
+          pageMeta.textContent = "Page 1";
+          total = 0;
+          return;
         }
+
+        total = Number(payload.total || 0);
+        renderRows(payload.items || []);
+        summary.textContent = `${total} total`;
+        const currentPage = Math.floor(offset / Number(limit)) + 1;
+        const totalPages = Math.max(1, Math.ceil(total / Number(limit)));
+        pageMeta.textContent = `Page ${currentPage} of ${totalPages}`;
+        prevBtn.disabled = offset <= 0;
+        nextBtn.disabled = offset + Number(limit) >= total;
+        setStatus("Loaded.");
       } catch (error) {
-        setResult({ ok: false, error: String(error && error.message ? error.message : error) });
+        renderRows([]);
+        total = 0;
+        summary.textContent = "0 total";
         setStatus("Network request failed.", true);
       } finally {
-        lookupBtn.disabled = false;
+        runSearch.disabled = false;
       }
+    }
+
+    runSearch.addEventListener("click", () => {
+      offset = 0;
+      loadCustomers();
     });
 
-    lookupValue.placeholder = currentPlaceholder();
+    prevBtn.addEventListener("click", () => {
+      const limit = Number(pageSize.value || 20);
+      offset = Math.max(0, offset - limit);
+      loadCustomers();
+    });
+
+    nextBtn.addEventListener("click", () => {
+      const limit = Number(pageSize.value || 20);
+      offset += limit;
+      loadCustomers();
+    });
   </script>
 </body>
 </html>

@@ -4408,6 +4408,157 @@ ul { margin: 0; padding-left: 18px; }
       });
     }
 
+    async function listAdminCustomers() {
+      await requireAdmin(request);
+      const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
+      const recentDaysRaw = Number(url.searchParams.get("recent_days") || 0);
+      const recentDays = Number.isFinite(recentDaysRaw) && recentDaysRaw > 0 ? Math.min(365, Math.round(recentDaysRaw)) : 0;
+      const limitRaw = Number(url.searchParams.get("limit") || 20);
+      const offsetRaw = Number(url.searchParams.get("offset") || 0);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, Math.round(limitRaw))) : 20;
+      const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.round(offsetRaw)) : 0;
+      const recentCutoff = recentDays ? now() - recentDays * 24 * 60 * 60 * 1000 : 0;
+      const qLike = q ? `%${q}%` : null;
+
+      const where = [];
+      const params = [];
+
+      if (qLike) {
+        where.push(`(
+          lower(coalesce(customer_id, '')) LIKE ? OR
+          lower(coalesce(first_name, '')) LIKE ? OR
+          lower(coalesce(last_name, '')) LIKE ? OR
+          lower(coalesce(email, '')) LIKE ? OR
+          lower(coalesce(wallet_address, '')) LIKE ? OR
+          lower(coalesce(business_name, '')) LIKE ? OR
+          lower(coalesce(business_type, '')) LIKE ? OR
+          lower(coalesce(business_subtype, '')) LIKE ? OR
+          lower(coalesce(service_area, '')) LIKE ?
+        )`);
+        for (let i = 0; i < 9; i += 1) params.push(qLike);
+      }
+
+      if (recentCutoff > 0) {
+        where.push("last_active_at >= ?");
+        params.push(recentCutoff);
+      }
+
+      const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+      const countRow = await env.DB.prepare(
+        `SELECT COUNT(*) AS total
+         FROM customers
+         ${whereSql}`
+      ).bind(...params).first();
+
+      const listRes = await env.DB.prepare(
+        `SELECT customer_id, primary_user_id, primary_session_id, first_name, last_name, wallet_address, wallet_chain_id,
+                email, phone, business_name, business_type, business_subtype, service_area,
+                consent_training, consent_followup, consent_marketing, notes,
+                created_at, updated_at, last_active_at
+         FROM customers
+         ${whereSql}
+         ORDER BY last_active_at DESC, updated_at DESC
+         LIMIT ? OFFSET ?`
+      ).bind(...params, limit, offset).all();
+
+      return json({
+        ok: true,
+        query: {
+          q: q || null,
+          recent_days: recentDays || null,
+          limit,
+          offset,
+        },
+        total: Number(countRow?.total || 0),
+        items: Array.isArray(listRes?.results) ? listRes.results : [],
+      });
+    }
+
+    async function getAdminCustomer(customerId) {
+      await requireAdmin(request);
+      const customer_id = String(customerId || "").trim();
+      if (!customer_id) return json({ ok: false, error: "customer_id_required" }, 400);
+
+      const customer = await env.DB.prepare(
+        `SELECT *
+         FROM customers
+         WHERE customer_id = ?`
+      ).bind(customer_id).first();
+      if (!customer) return json({ ok: false, error: "not_found" }, 404);
+
+      const identitiesRes = await env.DB.prepare(
+        `SELECT identity_type, identity_value, source, created_at, updated_at
+         FROM customer_identities
+         WHERE customer_id = ?
+         ORDER BY identity_type ASC, identity_value ASC`
+      ).bind(customer_id).all();
+
+      const sessionsRes = await env.DB.prepare(
+        `SELECT session_id, linked_at, linkage_source
+         FROM customer_sessions
+         WHERE customer_id = ?
+         ORDER BY linked_at DESC`
+      ).bind(customer_id).all();
+
+      return json({
+        ok: true,
+        customer,
+        identities: Array.isArray(identitiesRes?.results) ? identitiesRes.results : [],
+        sessions: Array.isArray(sessionsRes?.results) ? sessionsRes.results : [],
+      });
+    }
+
+    async function updateAdminCustomer(customerId) {
+      const actor = await requireAdmin(request);
+      const customer_id = String(customerId || "").trim();
+      if (!customer_id) return json({ ok: false, error: "customer_id_required" }, 400);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const current = await env.DB.prepare(
+        `SELECT customer_id, consent_training, consent_followup, consent_marketing, notes
+         FROM customers
+         WHERE customer_id = ?`
+      ).bind(customer_id).first();
+      if (!current) return json({ ok: false, error: "not_found" }, 404);
+
+      const nextTraining = body.consent_training !== undefined
+        ? normalizeMaybeBool(body.consent_training, null)
+        : current.consent_training;
+      const nextFollowup = body.consent_followup !== undefined
+        ? normalizeMaybeBool(body.consent_followup, null)
+        : current.consent_followup;
+      const nextMarketing = body.consent_marketing !== undefined
+        ? normalizeMaybeBool(body.consent_marketing, null)
+        : current.consent_marketing;
+      const nextNotes = body.notes !== undefined ? String(body.notes || "").trim().slice(0, 4000) || null : current.notes;
+
+      await env.DB.prepare(
+        `UPDATE customers
+         SET consent_training = ?, consent_followup = ?, consent_marketing = ?, notes = ?, updated_at = ?
+         WHERE customer_id = ?`
+      )
+        .bind(
+          nextTraining === null ? null : nextTraining ? 1 : 0,
+          nextFollowup === null ? null : nextFollowup ? 1 : 0,
+          nextMarketing === null ? null : nextMarketing ? 1 : 0,
+          nextNotes,
+          now(),
+          customer_id
+        )
+        .run();
+
+      await writeAdminAudit(actor, "update", "customer", customer_id, {
+        consent_training: nextTraining,
+        consent_followup: nextFollowup,
+        consent_marketing: nextMarketing,
+        notes: nextNotes,
+      });
+
+      return json({ ok: true, customer_id });
+    }
+
     function formatBytesForDisplay(rawBytes) {
       const bytes = Number(rawBytes || 0);
       if (!Number.isFinite(bytes) || bytes <= 0) return "unknown";
@@ -4697,6 +4848,20 @@ ul { margin: 0; padding-left: 18px; }
 
     if (url.pathname === "/admin/customers/lookup" && request.method === "GET") {
       return await runAdminRoute(() => lookupAdminCustomers());
+    }
+
+    if (url.pathname === "/admin/customers" && request.method === "GET") {
+      return await runAdminRoute(() => listAdminCustomers());
+    }
+
+    {
+      const customerItemMatch = url.pathname.match(/^\/admin\/customers\/([^/]+)$/);
+      if (customerItemMatch && request.method === "GET") {
+        return await runAdminRoute(() => getAdminCustomer(decodePathSegment(customerItemMatch[1])));
+      }
+      if (customerItemMatch && request.method === "PATCH") {
+        return await runAdminRoute(() => updateAdminCustomer(decodePathSegment(customerItemMatch[1])));
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/debug/business-types") {
