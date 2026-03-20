@@ -458,6 +458,45 @@ test('Q0_HELP_INTENT extracts embedded business description from website request
   assert.doesNotMatch(body.prompt, /briefly describe your business/i);
 });
 
+test('Q0_HELP_INTENT carries embedded location into service area when present', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q0_HELP_INTENT");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "pet store" }] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_q0_tropical_fish_store_reno",
+      state: "Q0_HELP_INTENT",
+      answer: "build me a website for my tropical fish store in reno",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"pet store"/i);
+
+  const upsert = db.statements.find((s) => /INSERT INTO session_vars/.test(s.sql));
+  assert.ok(upsert, "expected session_vars upsert");
+  const independentJson = String(upsert.params[2] || "");
+  const dependentJson = String(upsert.params[3] || "");
+  assert.match(independentJson, /"service_area":"reno"/i);
+  assert.match(dependentJson, /"location_hint":"reno"/i);
+});
+
 test("funnel status returns stage and CTA actions", async () => {
   const row = buildSessionRow({ ownSiteUrl: null });
   const independent = JSON.parse(row.independent_json);
