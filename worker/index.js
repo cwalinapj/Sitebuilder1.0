@@ -2215,6 +2215,23 @@ ul { margin: 0; padding-left: 18px; }
           },
         };
       }
+      const serviceOverride = detectSpecificServiceTradeType(description);
+      if (
+        serviceOverride &&
+        (!classified.business_type ||
+          classified.business_type === "construction company" ||
+          classified.business_type === "professional services business" ||
+          classified.confidence < 0.7)
+      ) {
+        return {
+          source: "catalog_service_override",
+          candidates: [serviceOverride],
+          classification: {
+            ...classified,
+            business_type: serviceOverride,
+          },
+        };
+      }
       if (classified.business_type && classified.confidence >= 0.55) {
         return {
           source: "catalog",
@@ -2258,6 +2275,26 @@ ul { margin: 0; padding-left: 18px; }
       ];
 
       for (const [label, pattern] of retailMatchers) {
+        if (pattern.test(s)) return label;
+      }
+      return null;
+    }
+
+    function detectSpecificServiceTradeType(desc) {
+      const s = String(desc || "").toLowerCase();
+      const serviceMatchers = [
+        ["remodeling contractor", /\b(remodel|remodels|remodeling|renovation|renovations|bathroom remodel|bath remodel|kitchen remodel|home renovation)\b/],
+        ["plumbing company", /\b(plumber|plumbing|drain cleaning|water heater|pipe repair|leak repair|sewer line)\b/],
+        ["electrical company", /\b(electrician|electrical|breaker panel|panel upgrade|wiring|rewire|outlet install|lighting install)\b/],
+        ["hvac company", /\b(hvac|heating and air|air conditioning|ac repair|furnace|ventilation|heat pump)\b/],
+        ["roofing company", /\b(roofing|roofer|roof repair|roof replacement|shingles)\b/],
+        ["painting company", /\b(house painter|painting company|interior painting|exterior painting|paint houses)\b/],
+        ["handyman service", /\b(handyman|home repair|odd jobs|small repairs|fix[- ]?it)\b/],
+        ["landscaping company", /\b(landscaping|landscaper|lawn care|yard maintenance|hardscaping|irrigation)\b/],
+        ["cleaning service", /\b(cleaning service|house cleaning|maid service|janitorial|office cleaning)\b/],
+      ];
+
+      for (const [label, pattern] of serviceMatchers) {
         if (pattern.test(s)) return label;
       }
       return null;

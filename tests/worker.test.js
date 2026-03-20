@@ -1203,6 +1203,102 @@ test('Q1_DESCRIBE maps "i sell flowers online" to flower shop over generic onlin
   assert.match(body.prompt, /"flower shop"/i);
 });
 
+test('Q1_DESCRIBE maps "i do bathroom remodels" to remodeling contractor over generic construction company', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "construction company" }, { canonical_type: "remodeling contractor" }] },
+      { results: [] },
+      {
+        results: [
+          {
+            id: 1,
+            canonical_type: "construction company",
+            signal_type: "service",
+            value: "construction",
+            normalized_value: "construction",
+            weight: 1.8,
+          },
+          {
+            id: 2,
+            canonical_type: "remodeling contractor",
+            signal_type: "strong_keyword",
+            value: "bathroom remodel",
+            normalized_value: "bathroom remodel",
+            weight: 2.3,
+          },
+        ],
+      },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_remodeling_contractor",
+      state: "Q1_DESCRIBE",
+      answer: "i do bathroom remodels",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"remodeling contractor"/i);
+});
+
+test('Q1_DESCRIBE maps "we do drain cleaning and water heaters" to plumbing company over generic professional services', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "professional services business" }, { canonical_type: "plumbing company" }] },
+      { results: [] },
+      {
+        results: [
+          {
+            id: 1,
+            canonical_type: "professional services business",
+            signal_type: "statement_pattern",
+            value: "we do",
+            normalized_value: "we do",
+            weight: 1.2,
+          },
+          {
+            id: 2,
+            canonical_type: "plumbing company",
+            signal_type: "service",
+            value: "drain cleaning",
+            normalized_value: "drain cleaning",
+            weight: 2.4,
+          },
+        ],
+      },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_plumbing_company",
+      state: "Q1_DESCRIBE",
+      answer: "we do drain cleaning and water heaters",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"plumbing company"/i);
+});
+
 test("Q1_TYPE_MANUAL does not revive deleted static aliases when D1 alias set is empty", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
   const db = createMockDb({
