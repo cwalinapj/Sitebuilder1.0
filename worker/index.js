@@ -4340,6 +4340,74 @@ ul { margin: 0; padding-left: 18px; }
       return json({ ok: true, count: body.length });
     }
 
+    async function lookupAdminCustomers() {
+      await requireAdmin(request);
+      const email = normalizeCustomerIdentity("email", url.searchParams.get("email"));
+      const session_id = String(url.searchParams.get("session_id") || "").trim() || null;
+      const walletRaw = String(url.searchParams.get("wallet") || "").trim();
+      const wallet_chain_id = Number.isFinite(Number(url.searchParams.get("wallet_chain_id")))
+        ? Math.round(Number(url.searchParams.get("wallet_chain_id")))
+        : 0;
+      const wallet = walletRaw ? normalizeCustomerIdentity("wallet", walletRaw, wallet_chain_id) : null;
+
+      if (!email && !session_id && !wallet) {
+        return json({ ok: false, error: "email_or_wallet_or_session_id_required" }, 400);
+      }
+
+      const matches = [];
+      if (session_id) {
+        const row = await env.DB.prepare(
+          `SELECT c.*, cs.session_id AS matched_session_id, cs.linkage_source, ci.identity_type AS matched_identity_type, ci.identity_value AS matched_identity_value
+           FROM customer_sessions cs
+           JOIN customers c ON c.customer_id = cs.customer_id
+           LEFT JOIN customer_identities ci ON ci.customer_id = c.customer_id AND ci.identity_type = 'session_id' AND ci.identity_value = cs.session_id
+           WHERE cs.session_id = ?
+           LIMIT 1`
+        ).bind(session_id).first();
+        if (row) matches.push({ match_type: "session_id", ...row });
+      }
+      if (email) {
+        const row = await env.DB.prepare(
+          `SELECT c.*, ci.identity_type AS matched_identity_type, ci.identity_value AS matched_identity_value
+           FROM customer_identities ci
+           JOIN customers c ON c.customer_id = ci.customer_id
+           WHERE ci.identity_type = 'email' AND ci.identity_value = ?
+           LIMIT 1`
+        ).bind(email).first();
+        if (row) matches.push({ match_type: "email", ...row });
+      }
+      if (wallet) {
+        const row = await env.DB.prepare(
+          `SELECT c.*, ci.identity_type AS matched_identity_type, ci.identity_value AS matched_identity_value
+           FROM customer_identities ci
+           JOIN customers c ON c.customer_id = ci.customer_id
+           WHERE ci.identity_type = 'wallet' AND ci.identity_value = ?
+           LIMIT 1`
+        ).bind(wallet).first();
+        if (row) matches.push({ match_type: "wallet", ...row });
+      }
+
+      const deduped = [];
+      const seen = new Set();
+      for (const row of matches) {
+        const id = String(row?.customer_id || "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        deduped.push(row);
+      }
+
+      return json({
+        ok: true,
+        query: {
+          email,
+          session_id,
+          wallet: walletRaw ? wallet : null,
+        },
+        count: deduped.length,
+        items: deduped,
+      });
+    }
+
     function formatBytesForDisplay(rawBytes) {
       const bytes = Number(rawBytes || 0);
       if (!Number.isFinite(bytes) || bytes <= 0) return "unknown";
@@ -4437,6 +4505,18 @@ ul { margin: 0; padding-left: 18px; }
       return (
         "Would you like us to email this audit report and/or send domain-expiration reminder emails?\n" +
         'Reply "yes" or "no". You can also say "report only" or "reminders only".'
+      );
+    }
+
+    function buildTrainingConsentPrompt() {
+      return (
+        "One quick privacy question: can I save this conversation and the site preferences you share so the builder can learn your style and improve future builds for you? (yes/no)"
+      );
+    }
+
+    function buildMarketingConsentPrompt() {
+      return (
+        "Last one: do you want occasional follow-up about new site-builder features, templates, or launch updates? (yes/no)"
       );
     }
 
@@ -4613,6 +4693,10 @@ ul { margin: 0; padding-left: 18px; }
 
     if (url.pathname === "/admin/seed" && request.method === "POST") {
       return await runAdminRoute(() => seedAdminCatalog());
+    }
+
+    if (url.pathname === "/admin/customers/lookup" && request.method === "GET") {
+      return await runAdminRoute(() => lookupAdminCustomers());
     }
 
     if (request.method === "GET" && url.pathname === "/debug/business-types") {
@@ -7079,11 +7163,11 @@ ul { margin: 0; padding-left: 18px; }
 
         return await reply({
           ok: true,
-          next_state: "Q2_HAPPY_COSTS",
+          next_state: "Q2_CONSENT_TRAINING",
           prompt:
             dependent?.scan?.latest_summary
-              ? `I reviewed your current site and captured key details (${dependent.scan.latest_summary}). ${buildSecondPartPrompt()}`
-              : buildSecondPartPrompt(),
+              ? `I reviewed your current site and captured key details (${dependent.scan.latest_summary}).\n\n${buildTrainingConsentPrompt()}`
+              : buildTrainingConsentPrompt(),
         });
       }
 
@@ -7132,10 +7216,10 @@ ul { margin: 0; padding-left: 18px; }
         dependent.flow.audit_requested = false;
         return await reply({
           ok: true,
-          next_state: "Q2_HAPPY_COSTS",
+          next_state: "Q2_CONSENT_TRAINING",
           prompt:
             "No problem — we can skip the audit for now. If you want later, I can still run a WordPress security/speed audit.\n" +
-            buildSecondPartPrompt(),
+            buildTrainingConsentPrompt(),
         });
       }
 
@@ -7172,8 +7256,36 @@ ul { margin: 0; padding-left: 18px; }
 
         return await reply({
           ok: true,
+          next_state: "Q2_CONSENT_TRAINING",
+          prompt: `${saveNote}\n\n${buildTrainingConsentPrompt()}`,
+        });
+      }
+
+      if (state === "Q2_CONSENT_TRAINING") {
+        const v = yesNoMaybe(answer);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
+        dependent.consent.training = v === "yes";
+        dependent.consent.updated_at = now();
+        dependent.consent.source = "chat_training_consent";
+        await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
+        return await reply({
+          ok: true,
+          next_state: "Q2_CONSENT_MARKETING",
+          prompt: buildMarketingConsentPrompt(),
+        });
+      }
+
+      if (state === "Q2_CONSENT_MARKETING") {
+        const v = yesNoMaybe(answer);
+        if (v !== "yes" && v !== "no") return json({ ok: false, error: friendlyYesNoError() }, 400);
+        dependent.consent.marketing = v === "yes";
+        dependent.consent.updated_at = now();
+        dependent.consent.source = "chat_marketing_consent";
+        await upsertSessionVars(session_id, "onboarding_v8", independent, dependent);
+        return await reply({
+          ok: true,
           next_state: "Q2_HAPPY_COSTS",
-          prompt: `${saveNote}\n\n${buildSecondPartPrompt()}`,
+          prompt: buildSecondPartPrompt(),
         });
       }
 

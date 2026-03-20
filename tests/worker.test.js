@@ -1739,6 +1739,73 @@ test("admin seed route upserts catalog aliases and signals with valid bearer tok
   assert.ok(db.statements.some((s) => s.op === "run" && /INSERT INTO admin_audit_log/i.test(s.sql)));
 });
 
+test("admin customer lookup requires a query key", async () => {
+  const db = createMockDb();
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers/lookup", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error, "email_or_wallet_or_session_id_required");
+});
+
+test("admin customer lookup returns customer by email", async () => {
+  const db = createMockDb({
+    firstResponses: [
+      {
+        customer_id: "cus_123",
+        email: "owner@example.com",
+        business_name: "Blue Reef Dive",
+        matched_identity_type: "email",
+        matched_identity_value: "owner@example.com",
+      },
+    ],
+  });
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers/lookup?email=Owner@Example.com", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.count, 1);
+  assert.equal(body.items[0].customer_id, "cus_123");
+  assert.equal(body.items[0].matched_identity_type, "email");
+});
+
+test("admin customer lookup returns customer by session_id", async () => {
+  const db = createMockDb({
+    firstResponses: [
+      {
+        customer_id: "cus_session",
+        matched_session_id: "ses_abc",
+        linkage_source: "identity_match",
+        matched_identity_type: "session_id",
+        matched_identity_value: "ses_abc",
+      },
+    ],
+  });
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers/lookup?session_id=ses_abc", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.count, 1);
+  assert.equal(body.items[0].customer_id, "cus_session");
+  assert.equal(body.items[0].match_type, "session_id");
+});
+
 test("Q1_DESCRIBE uses D1 signal evidence to classify family lawyer correctly", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
   const db = createMockDb({
@@ -2423,8 +2490,9 @@ test("Q2_CONFIRM_OWNERSHIP yes runs scan immediately and returns reviewed prompt
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.equal(body.next_state, "Q2_CONSENT_TRAINING");
   assert.match(body.prompt, /I reviewed your current site/i);
+  assert.match(body.prompt, /privacy question/i);
 });
 
 test('Q2_CONFIRM_OWNERSHIP accepts "yah" as yes and continues flow', async () => {
@@ -2470,8 +2538,9 @@ test('Q2_CONFIRM_OWNERSHIP accepts "yah" as yes and continues flow', async () =>
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.equal(body.next_state, "Q2_CONSENT_TRAINING");
   assert.match(body.prompt, /I reviewed your current site/i);
+  assert.match(body.prompt, /privacy question/i);
 });
 
 test('Q2_CONFIRM_OWNERSHIP accepts "current website" and continues as an owned site', async () => {
@@ -2515,8 +2584,9 @@ test('Q2_CONFIRM_OWNERSHIP accepts "current website" and continues as an owned s
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.equal(body.next_state, "Q2_CONSENT_TRAINING");
   assert.match(body.prompt, /I reviewed your current site/i);
+  assert.match(body.prompt, /privacy question/i);
 });
 
 test('Q2_CONFIRM_OWNERSHIP accepts "reference site" and routes into reference feedback', async () => {
@@ -2632,7 +2702,8 @@ test('Q2_CONFIRM_OWNERSHIP accepts "this is my current website"', async () => {
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.equal(body.next_state, "Q2_CONSENT_TRAINING");
+  assert.match(body.prompt, /privacy question/i);
 });
 
 test("Q2_CONFIRM_OWNERSHIP accepts \"it's just a site I like\"", async () => {
@@ -2941,9 +3012,9 @@ test("Q2_AUDIT_EMAIL_OPTIN saves choices and continues to second part", async ()
   const response = await worker.fetch(req, { DB: db });
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.equal(body.next_state, "Q2_CONSENT_TRAINING");
   assert.match(body.prompt, /email the audit report/i);
-  assert.match(body.prompt, /Second part:/i);
+  assert.match(body.prompt, /privacy question/i);
   const customerUpsert = db.statements.find((x) => /INSERT INTO customers\(/.test(x.sql));
   assert.ok(customerUpsert, "expected customer upsert during opt-in save");
   assert.equal(customerUpsert.params[21], 1);
@@ -2978,10 +3049,72 @@ test("repeat sessions link to the same customer by normalized email identity", a
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.equal(body.next_state, "Q2_CONSENT_TRAINING");
   const customerUpsert = db.statements.find((x) => /INSERT INTO customers\(/.test(x.sql));
   assert.ok(customerUpsert, "expected customer upsert");
   assert.equal(customerUpsert.params[0], "cus_existing");
+});
+
+test("Q2_CONSENT_TRAINING saves explicit training consent and advances", async () => {
+  const sessionRow = withExpectedState(buildSessionRow(), "Q2_CONSENT_TRAINING");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }, null, null, null, null],
+  });
+
+  const response = await worker.fetch(
+    new Request("https://worker.example/q1/answer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: "ses_training_consent",
+        state: "Q2_CONSENT_TRAINING",
+        answer: "yes",
+      }),
+    }),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q2_CONSENT_MARKETING");
+  assert.match(body.prompt, /follow-up about new site-builder features/i);
+  const customerUpsert = db.statements.find((x) => /INSERT INTO customers\(/.test(x.sql));
+  assert.ok(customerUpsert);
+  assert.equal(customerUpsert.params[20], 1);
+});
+
+test("Q2_CONSENT_MARKETING saves explicit marketing consent and advances", async () => {
+  const baseRow = withExpectedState(buildSessionRow(), "Q2_CONSENT_MARKETING");
+  const dependent = JSON.parse(baseRow.dependent_json);
+  dependent.consent = { training: true, followup: null, marketing: null, updated_at: null, source: "chat_training_consent" };
+  const sessionRow = {
+    ...baseRow,
+    dependent_json: JSON.stringify(dependent),
+  };
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }, null, null, null, null],
+  });
+
+  const response = await worker.fetch(
+    new Request("https://worker.example/q1/answer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: "ses_marketing_consent",
+        state: "Q2_CONSENT_MARKETING",
+        answer: "no",
+      }),
+    }),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  assert.match(body.prompt, /Second part:/i);
+  const customerUpsert = db.statements.find((x) => /INSERT INTO customers\(/.test(x.sql));
+  assert.ok(customerUpsert);
+  assert.equal(customerUpsert.params[22], 0);
 });
 
 test("Q2_WP_AUDIT_OFFER maybe returns more-detail prompt instead of error", async () => {
