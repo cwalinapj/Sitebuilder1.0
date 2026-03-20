@@ -159,6 +159,26 @@ test("q1/start rejects invalid first/last names", async () => {
   assert.equal(db.statements.length, 0);
 });
 
+test("q1/start creates durable customer profile records", async () => {
+  const db = createMockDb({
+    firstResponses: [{ user_id: "usr_repeatable" }],
+  });
+  const req = new Request("https://worker.example/q1/start", {
+    method: "POST",
+    headers: { "content-type": "application/json", "CF-Connecting-IP": "203.0.113.41" },
+    body: JSON.stringify({ FirstName: "Paul", LastName: "Cwalina" }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.ok(db.statements.some((x) => /INSERT INTO customers\(/.test(x.sql)));
+  assert.ok(db.statements.some((x) => /INSERT INTO customer_identities/.test(x.sql)));
+  assert.ok(db.statements.some((x) => /INSERT INTO customer_sessions/.test(x.sql)));
+});
+
 test("q1/start rejects short first/last names with explicit minimums", async () => {
   const db = createMockDb();
   const req = new Request("https://worker.example/q1/start", {
@@ -2906,7 +2926,7 @@ test("Q2_AUDIT_EMAIL_OPTIN saves choices and continues to second part", async ()
     "Q2_AUDIT_EMAIL_OPTIN"
   );
   const db = createMockDb({
-    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }, null, null, null, null],
   });
   const req = new Request("https://worker.example/q1/answer", {
     method: "POST",
@@ -2924,6 +2944,44 @@ test("Q2_AUDIT_EMAIL_OPTIN saves choices and continues to second part", async ()
   assert.equal(body.next_state, "Q2_HAPPY_COSTS");
   assert.match(body.prompt, /email the audit report/i);
   assert.match(body.prompt, /Second part:/i);
+  const customerUpsert = db.statements.find((x) => /INSERT INTO customers\(/.test(x.sql));
+  assert.ok(customerUpsert, "expected customer upsert during opt-in save");
+  assert.equal(customerUpsert.params[21], 1);
+});
+
+test("repeat sessions link to the same customer by normalized email identity", async () => {
+  const sessionRow = withExpectedState(
+    buildSessionRow({ ownSiteUrl: "https://wp-site.example/", sitePlatform: "wordpress", isWordpress: true }),
+    "Q2_AUDIT_EMAIL_OPTIN"
+  );
+  const db = createMockDb({
+    firstResponses: [
+      sessionRow,
+      { m: 0 },
+      { user_id: "usr_existing" },
+      null,
+      { customer_id: "cus_existing" },
+      { m: 1 },
+    ],
+  });
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_repeat_customer",
+      state: "Q2_AUDIT_EMAIL_OPTIN",
+      answer: "report only to owner@example.com",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q2_HAPPY_COSTS");
+  const customerUpsert = db.statements.find((x) => /INSERT INTO customers\(/.test(x.sql));
+  assert.ok(customerUpsert, "expected customer upsert");
+  assert.equal(customerUpsert.params[0], "cus_existing");
 });
 
 test("Q2_WP_AUDIT_OFFER maybe returns more-detail prompt instead of error", async () => {

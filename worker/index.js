@@ -399,6 +399,11 @@ const worker = {
       )
         .bind(session_id, block_id, JSON.stringify(independent), JSON.stringify(dependent), now())
         .run();
+      try {
+        await syncCustomerProfile(session_id, independent, dependent);
+      } catch {
+        // Customer profile sync is best-effort so onboarding still works before/while migrations roll out.
+      }
     }
 
     async function loadSessionVars(session_id, block_id) {
@@ -436,6 +441,215 @@ const worker = {
         await env.DB.prepare("INSERT INTO sessions(session_id, user_id, created_at, last_seen_at) VALUES (?,?,?,?)")
           .bind(session_id, user_id, created_at, created_at)
           .run();
+      }
+    }
+
+    function normalizeCustomerIdentity(type, value, extra = null) {
+      const raw = String(value || "").trim();
+      if (!raw) return null;
+      if (type === "email") {
+        const email = raw.toLowerCase();
+        return isLikelyEmail(email) ? email : null;
+      }
+      if (type === "wallet") {
+        const address = raw.toLowerCase();
+        const chain = Number.isFinite(Number(extra)) ? Math.round(Number(extra)) : 0;
+        return `${chain}:${address}`;
+      }
+      return raw;
+    }
+
+    async function getSessionUserId(session_id) {
+      try {
+        const row = await env.DB.prepare("SELECT user_id FROM sessions WHERE session_id=?").bind(session_id).first();
+        return row?.user_id || null;
+      } catch {
+        return null;
+      }
+    }
+
+    function projectCustomerProfile(independent, dependent) {
+      const walletAddress = String(dependent?.plugin?.wallet_auth?.wallet_address || "").trim().toLowerCase() || null;
+      const walletChainId = Number.isFinite(Number(dependent?.plugin?.wallet_auth?.chain_id))
+        ? Math.round(Number(dependent.plugin.wallet_auth.chain_id))
+        : null;
+      const email =
+        String(independent?.build?.email || dependent?.followup?.email || dependent?.plugin?.email_forwarding?.forward_to_email || "")
+          .trim()
+          .toLowerCase() || null;
+      const phone = String(independent?.build?.phone || "").trim() || null;
+      const explicitTraining =
+        typeof dependent?.consent?.training === "boolean" ? dependent.consent.training : null;
+      const explicitFollowup =
+        typeof dependent?.consent?.followup === "boolean"
+          ? dependent.consent.followup
+          : dependent?.followup?.requested === true
+            ? true
+            : dependent?.followup?.audit_report_email_opt_in !== null || dependent?.followup?.domain_expiry_reminder_opt_in !== null
+              ? Boolean(dependent?.followup?.audit_report_email_opt_in || dependent?.followup?.domain_expiry_reminder_opt_in)
+              : null;
+      const explicitMarketing =
+        typeof dependent?.consent?.marketing === "boolean" ? dependent.consent.marketing : null;
+
+      return {
+        first_name: String(independent?.person?.first_name || "").trim() || null,
+        last_name: String(independent?.person?.last_name || "").trim() || null,
+        wallet_address: walletAddress,
+        wallet_chain_id: walletChainId,
+        email: email && isLikelyEmail(email) ? email : null,
+        phone,
+        business_name: String(independent?.build?.business_name || "").trim() || null,
+        business_description: String(independent?.business?.description_raw || "").trim() || null,
+        business_type: String(independent?.business?.type_final || "").trim() || null,
+        business_subtype: String(independent?.business?.subtype_final || "").trim() || null,
+        website_url: toHttpsUrl(independent?.business?.own_site_url || independent?.build?.website_guess || null),
+        reference_site_url: toHttpsUrl(independent?.business?.reference_site_url || null),
+        service_area: String(independent?.build?.service_area || "").trim() || null,
+        address: String(independent?.build?.address || "").trim() || null,
+        goal: String(independent?.build?.goal || "").trim() || null,
+        vibe: String(independent?.build?.vibe || "").trim() || null,
+        colors: String(independent?.build?.colors || "").trim() || null,
+        consent_training: explicitTraining,
+        consent_followup: explicitFollowup,
+        consent_marketing: explicitMarketing,
+      };
+    }
+
+    async function resolveExistingCustomerId(session_id, profile, user_id) {
+      try {
+        const linked = await env.DB.prepare("SELECT customer_id FROM customer_sessions WHERE session_id=?").bind(session_id).first();
+        if (linked?.customer_id) return linked.customer_id;
+      } catch {}
+
+      const identities = [];
+      if (user_id) identities.push(["user_id", user_id]);
+      if (profile?.email) identities.push(["email", normalizeCustomerIdentity("email", profile.email)]);
+      if (profile?.wallet_address) identities.push(["wallet", normalizeCustomerIdentity("wallet", profile.wallet_address, profile.wallet_chain_id)]);
+
+      for (const [identity_type, identity_value] of identities) {
+        if (!identity_value) continue;
+        try {
+          const found = await env.DB.prepare(
+            "SELECT customer_id FROM customer_identities WHERE identity_type=? AND identity_value=?"
+          )
+            .bind(identity_type, identity_value)
+            .first();
+          if (found?.customer_id) return found.customer_id;
+        } catch {}
+      }
+      return null;
+    }
+
+    async function syncCustomerProfile(session_id, independent, dependent) {
+      const user_id = await getSessionUserId(session_id);
+      const profile = projectCustomerProfile(independent, dependent);
+      const existingCustomerId = await resolveExistingCustomerId(session_id, profile, user_id);
+      const customer_id = existingCustomerId || newId("cus");
+      const ts = now();
+
+      await env.DB.prepare(
+        `INSERT INTO customers(
+           customer_id, primary_user_id, primary_session_id, first_name, last_name, wallet_address, wallet_chain_id,
+           email, phone, business_name, business_description, business_type, business_subtype, website_url,
+           reference_site_url, service_area, address, goal, vibe, colors, consent_training, consent_followup,
+           consent_marketing, created_at, updated_at, last_active_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(customer_id) DO UPDATE SET
+           primary_user_id=COALESCE(excluded.primary_user_id, customers.primary_user_id),
+           primary_session_id=COALESCE(customers.primary_session_id, excluded.primary_session_id),
+           first_name=COALESCE(excluded.first_name, customers.first_name),
+           last_name=COALESCE(excluded.last_name, customers.last_name),
+           wallet_address=COALESCE(excluded.wallet_address, customers.wallet_address),
+           wallet_chain_id=COALESCE(excluded.wallet_chain_id, customers.wallet_chain_id),
+           email=COALESCE(excluded.email, customers.email),
+           phone=COALESCE(excluded.phone, customers.phone),
+           business_name=COALESCE(excluded.business_name, customers.business_name),
+           business_description=COALESCE(excluded.business_description, customers.business_description),
+           business_type=COALESCE(excluded.business_type, customers.business_type),
+           business_subtype=COALESCE(excluded.business_subtype, customers.business_subtype),
+           website_url=COALESCE(excluded.website_url, customers.website_url),
+           reference_site_url=COALESCE(excluded.reference_site_url, customers.reference_site_url),
+           service_area=COALESCE(excluded.service_area, customers.service_area),
+           address=COALESCE(excluded.address, customers.address),
+           goal=COALESCE(excluded.goal, customers.goal),
+           vibe=COALESCE(excluded.vibe, customers.vibe),
+           colors=COALESCE(excluded.colors, customers.colors),
+           consent_training=COALESCE(excluded.consent_training, customers.consent_training),
+           consent_followup=COALESCE(excluded.consent_followup, customers.consent_followup),
+           consent_marketing=COALESCE(excluded.consent_marketing, customers.consent_marketing),
+           updated_at=excluded.updated_at,
+           last_active_at=excluded.last_active_at`
+      )
+        .bind(
+          customer_id,
+          user_id,
+          session_id,
+          profile.first_name,
+          profile.last_name,
+          profile.wallet_address,
+          profile.wallet_chain_id,
+          profile.email,
+          profile.phone,
+          profile.business_name,
+          profile.business_description,
+          profile.business_type,
+          profile.business_subtype,
+          profile.website_url,
+          profile.reference_site_url,
+          profile.service_area,
+          profile.address,
+          profile.goal,
+          profile.vibe,
+          profile.colors,
+          profile.consent_training === null ? null : profile.consent_training ? 1 : 0,
+          profile.consent_followup === null ? null : profile.consent_followup ? 1 : 0,
+          profile.consent_marketing === null ? null : profile.consent_marketing ? 1 : 0,
+          ts,
+          ts,
+          ts
+        )
+        .run();
+
+      const identityTuples = [
+        ["session_id", session_id, "session_lineage"],
+        user_id ? ["user_id", user_id, "session_user"] : null,
+        profile.email ? ["email", normalizeCustomerIdentity("email", profile.email), "onboarding_email"] : null,
+        profile.wallet_address
+          ? ["wallet", normalizeCustomerIdentity("wallet", profile.wallet_address, profile.wallet_chain_id), "wallet_auth"]
+          : null,
+      ].filter(Boolean);
+
+      for (const [identity_type, identity_value, source] of identityTuples) {
+        if (!identity_value) continue;
+        await env.DB.prepare(
+          `INSERT INTO customer_identities(identity_type, identity_value, customer_id, source, created_at, updated_at)
+           VALUES (?,?,?,?,?,?)
+           ON CONFLICT(identity_type, identity_value) DO UPDATE SET
+             customer_id=excluded.customer_id,
+             source=excluded.source,
+             updated_at=excluded.updated_at`
+        )
+          .bind(identity_type, identity_value, customer_id, source, ts, ts)
+          .run();
+      }
+
+      await env.DB.prepare(
+        `INSERT INTO customer_sessions(session_id, customer_id, linked_at, linkage_source)
+         VALUES (?,?,?,?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           customer_id=excluded.customer_id,
+           linked_at=excluded.linked_at,
+           linkage_source=excluded.linkage_source`
+      )
+        .bind(session_id, customer_id, ts, existingCustomerId ? "identity_match" : "session_init")
+        .run();
+
+      try {
+        await env.DB.prepare("UPDATE sessions SET customer_id=?, last_seen_at=? WHERE session_id=?")
+          .bind(customer_id, ts, session_id)
+          .run();
+      } catch {
+        // Backward compatibility if sessions.customer_id is not present yet.
       }
     }
 
@@ -2945,6 +3159,16 @@ ul { margin: 0; padding-left: 18px; }
       dependent.followup.audit_email_opted_at = dependent.followup.audit_email_opted_at || null;
       dependent.followup.audit_email_optin_source = dependent.followup.audit_email_optin_source || null;
       return dependent.followup;
+    }
+
+    function ensureConsentState(dependent) {
+      dependent.consent = dependent.consent || {};
+      dependent.consent.training = normalizeMaybeBool(dependent.consent.training, null);
+      dependent.consent.followup = normalizeMaybeBool(dependent.consent.followup, null);
+      dependent.consent.marketing = normalizeMaybeBool(dependent.consent.marketing, null);
+      dependent.consent.updated_at = dependent.consent.updated_at || null;
+      dependent.consent.source = dependent.consent.source || null;
+      return dependent.consent;
     }
 
     function ensureUpgradeState(dependent) {
@@ -5933,6 +6157,13 @@ ul { margin: 0; padding-left: 18px; }
           audit_email_opted_at: null,
           audit_email_optin_source: null,
         },
+        consent: {
+          training: null,
+          followup: null,
+          marketing: null,
+          updated_at: null,
+          source: null,
+        },
         schema_setup: {
           profile: null,
           jsonld: null,
@@ -6078,6 +6309,7 @@ ul { margin: 0; padding-left: 18px; }
       ensureFunnelState(dependent);
       ensurePluginState(dependent);
       ensureFollowupState(dependent);
+      ensureConsentState(dependent);
       dependent.security = dependent.security || {
         turnstile_enabled: isTurnstileEnabled(),
         turnstile_verified: !isTurnstileEnabled(),
@@ -6934,6 +7166,9 @@ ul { margin: 0; padding-left: 18px; }
         dependent.followup.domain_expiry_reminder_opt_in = reminderOptIn;
         dependent.followup.audit_email_opted_at = now();
         dependent.followup.audit_email_optin_source = "chat";
+        dependent.consent.followup = pref.decision === "yes" ? reportOptIn || reminderOptIn : pref.decision === "no" ? false : null;
+        dependent.consent.updated_at = now();
+        dependent.consent.source = "audit_email_optin_chat";
 
         return await reply({
           ok: true,
