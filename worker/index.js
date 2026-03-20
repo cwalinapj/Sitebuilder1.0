@@ -1906,11 +1906,11 @@ ul { margin: 0; padding-left: 18px; }
 
       const raw = String(description || "").trim();
       const normalized = normalizeBusinessPhrase(raw);
-      if (!normalized) return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+      if (!normalized) return { subtype_key: null, display_label: null, confidence: 0, evidence: [], ranked: [] };
 
       const { subtypes, aliases, signals } = await getBusinessSubtypeCatalogSnapshot();
       const subtypeRows = (Array.isArray(subtypes) ? subtypes : []).filter((row) => row.canonical_type === canonical);
-      if (!subtypeRows.length) return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+      if (!subtypeRows.length) return { subtype_key: null, display_label: null, confidence: 0, evidence: [], ranked: [] };
 
       const subtypeMap = new Map(subtypeRows.map((row) => [row.subtype_key, row]));
       const scores = new Map();
@@ -1972,7 +1972,7 @@ ul { margin: 0; padding-left: 18px; }
         }));
 
       if (!ranked.length || ranked[0].score <= 0) {
-        return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+        return { subtype_key: null, display_label: null, confidence: 0, evidence: [], ranked: [] };
       }
 
       const best = ranked[0];
@@ -1980,6 +1980,7 @@ ul { margin: 0; padding-left: 18px; }
       const confidence = Math.max(0.35, Math.min(0.99, best.score / Math.max(best.score + runnerUpScore + 1, 1)));
       return {
         subtype_key: best.subtype_key,
+        display_label: best.display_label || best.subtype_key,
         confidence,
         evidence: best.evidence.slice(0, 5),
         ranked,
@@ -2232,6 +2233,22 @@ ul { margin: 0; padding-left: 18px; }
           },
         };
       }
+      const specialtyCanonicalOverride = detectSpecificProfessionalSpecialtyCanonicalType(description);
+      if (
+        specialtyCanonicalOverride &&
+        (!classified.business_type ||
+          classified.business_type === "professional services business" ||
+          classified.confidence < 0.7)
+      ) {
+        return {
+          source: "catalog_specialty_override",
+          candidates: [specialtyCanonicalOverride],
+          classification: {
+            ...classified,
+            business_type: specialtyCanonicalOverride,
+          },
+        };
+      }
       if (classified.business_type && classified.confidence >= 0.55) {
         return {
           source: "catalog",
@@ -2300,6 +2317,22 @@ ul { margin: 0; padding-left: 18px; }
       return null;
     }
 
+    function detectSpecificProfessionalSpecialtyCanonicalType(desc) {
+      const s = String(desc || "").toLowerCase();
+      if (
+        /\b(family lawyer|divorce lawyer|custody lawyer|immigration lawyer|visa lawyer|estate lawyer|wills and trusts lawyer|tax lawyer|irs lawyer|injury lawyer|accident lawyer)\b/.test(s)
+      ) {
+        return "law firm";
+      }
+      if (/\b(orthodontist|braces clinic|cosmetic dentist)\b/.test(s)) {
+        return "dental office";
+      }
+      if (/\b(urgent care|walk in clinic|dermatologist|skin doctor|pediatrician|pediatrician office)\b/.test(s)) {
+        return "medical clinic";
+      }
+      return null;
+    }
+
     async function resolveBusinessSubtype(description, canonicalType) {
       const canonical = await canonicalizeBusinessTypeLabel(canonicalType);
       if (!canonical) return null;
@@ -2308,10 +2341,16 @@ ul { margin: 0; padding-left: 18px; }
       return {
         source: "catalog",
         subtype_key: classified.subtype_key,
+        display_label: classified.display_label || classified.subtype_key,
         confidence: classified.confidence,
         evidence: classified.evidence,
         ranked: classified.ranked,
       };
+    }
+
+    function preferredBusinessTypePromptLabel(typeGuess, subtypeGuess, subtypeDisplayLabel) {
+      if (subtypeGuess) return subtypeDisplayLabel || subtypeGuess;
+      return typeGuess;
     }
 
     function guessBusinessType(desc) {
@@ -6429,6 +6468,7 @@ ul { margin: 0; padding-left: 18px; }
         dependent.draft.subtype_source = null;
         dependent.draft.subtype_confidence = null;
         dependent.draft.subtype_evidence = [];
+        dependent.draft.subtype_display_label = null;
         if (resolved.classification) {
           dependent.draft.type_confidence = resolved.classification.confidence;
           dependent.draft.type_evidence = resolved.classification.evidence;
@@ -6447,6 +6487,7 @@ ul { margin: 0; padding-left: 18px; }
             dependent.draft.subtype_source = subtypeResolved.source;
             dependent.draft.subtype_confidence = subtypeResolved.confidence;
             dependent.draft.subtype_evidence = subtypeResolved.evidence;
+            dependent.draft.subtype_display_label = subtypeResolved.display_label || subtypeResolved.subtype_key;
           }
         }
 
@@ -6466,7 +6507,11 @@ ul { margin: 0; padding-left: 18px; }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Based on what you said, the closest label looks like "${dependent.draft.type_guess}". Want me to use that?`,
+          prompt: `Based on what you said, the closest label looks like "${preferredBusinessTypePromptLabel(
+            dependent.draft.type_guess,
+            dependent.draft.subtype_guess,
+            dependent.draft.subtype_display_label
+          )}". Want me to use that?`,
           source: resolved.source,
         });
       }
@@ -6489,17 +6534,23 @@ ul { margin: 0; padding-left: 18px; }
         dependent.draft.subtype_source = null;
         dependent.draft.subtype_confidence = null;
         dependent.draft.subtype_evidence = [];
+        dependent.draft.subtype_display_label = null;
         const subtypeResolved = await resolveBusinessSubtype(independent?.business?.description_raw || "", picked);
         if (subtypeResolved?.subtype_key) {
           dependent.draft.subtype_guess = subtypeResolved.subtype_key;
           dependent.draft.subtype_source = subtypeResolved.source;
           dependent.draft.subtype_confidence = subtypeResolved.confidence;
           dependent.draft.subtype_evidence = subtypeResolved.evidence;
+          dependent.draft.subtype_display_label = subtypeResolved.display_label || subtypeResolved.subtype_key;
         }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Got it. The label I’d use is "${picked}". Want me to save it that way?`,
+          prompt: `Got it. The label I’d use is "${preferredBusinessTypePromptLabel(
+            picked,
+            dependent.draft.subtype_guess,
+            dependent.draft.subtype_display_label
+          )}". Want me to save it that way?`,
         });
       }
 
@@ -6542,17 +6593,23 @@ ul { margin: 0; padding-left: 18px; }
         dependent.draft.subtype_source = null;
         dependent.draft.subtype_confidence = null;
         dependent.draft.subtype_evidence = [];
+        dependent.draft.subtype_display_label = null;
         const subtypeResolved = await resolveBusinessSubtype(independent?.business?.description_raw || "", t);
         if (subtypeResolved?.subtype_key) {
           dependent.draft.subtype_guess = subtypeResolved.subtype_key;
           dependent.draft.subtype_source = subtypeResolved.source;
           dependent.draft.subtype_confidence = subtypeResolved.confidence;
           dependent.draft.subtype_evidence = subtypeResolved.evidence;
+          dependent.draft.subtype_display_label = subtypeResolved.display_label || subtypeResolved.subtype_key;
         }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
-          prompt: `Okay, I can use "${t}" as your business type. Want me to save it that way?`,
+          prompt: `Okay, I can use "${preferredBusinessTypePromptLabel(
+            t,
+            dependent.draft.subtype_guess,
+            dependent.draft.subtype_display_label
+          )}" as your business type. Want me to save it that way?`,
         });
       }
 

@@ -983,12 +983,76 @@ test("Q1_DESCRIBE stores subtype when a canonical subtype match is found", async
 
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
-  assert.match(body.prompt, /"restaurant"/i);
+  assert.match(body.prompt, /"Pizzeria"/i);
 
   const upsert = db.statements.find((s) => /INSERT INTO session_vars/.test(s.sql));
   assert.ok(upsert, "expected session_vars upsert");
   const dependentJson = String(upsert.params[3] || "");
   assert.match(dependentJson, /"subtype_guess":"pizzeria"/);
+});
+
+test('Q1_DESCRIBE prefers legal specialty display label for "family lawyer"', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "law firm" }] },
+      { results: [] },
+      { results: [] },
+      { results: [{ subtype_key: "family law firm", canonical_type: "law firm", display_label: "Family Law Firm", category: "legal_specialties" }] },
+      { results: [{ alias_phrase: "family lawyer", subtype_key: "family law firm" }] },
+      { results: [{ id: 1, subtype_key: "family law firm", signal_type: "profession", value: "family lawyer", normalized_value: "family lawyer", weight: 4 }] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_family_law",
+      state: "Q1_DESCRIBE",
+      answer: "I am a family lawyer",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"Family Law Firm"/i);
+});
+
+test('Q1_DESCRIBE prefers medical specialty display label for "orthodontist"', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "dental office" }] },
+      { results: [] },
+      { results: [] },
+      { results: [{ subtype_key: "orthodontic practice", canonical_type: "dental office", display_label: "Orthodontic Practice", category: "medical_specialties" }] },
+      { results: [{ alias_phrase: "orthodontist", subtype_key: "orthodontic practice" }] },
+      { results: [{ id: 1, subtype_key: "orthodontic practice", signal_type: "profession", value: "orthodontist", normalized_value: "orthodontist", weight: 4 }] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_orthodontic",
+      state: "Q1_DESCRIBE",
+      answer: "I am an orthodontist",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"Orthodontic Practice"/i);
 });
 
 test("Q1_DESCRIBE classifies `i own a <canonical>` across the static canonical catalog", async () => {
