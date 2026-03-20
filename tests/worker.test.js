@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createHmac } from "node:crypto";
 
@@ -112,6 +113,33 @@ function createPluginApiStub(routeHandlers) {
       return handler(request, url);
     },
   };
+}
+
+function escapeRegex(text) {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractStaticCatalogLabels() {
+  const source = readFileSync(new URL("../worker/index.js", import.meta.url), "utf8");
+  const match = source.match(/const BUSINESS_TYPE_CATALOG = \[(.*?)\n    \];/s);
+  assert.ok(match, "expected BUSINESS_TYPE_CATALOG block in worker/index.js");
+  return Array.from(match[1].matchAll(/label:\s*"([^"]+)"/g), (entry) => entry[1]);
+}
+
+const STATIC_CATALOG_LABELS = extractStaticCatalogLabels();
+
+function createStaticCatalogSnapshotResponses() {
+  return [
+    { results: STATIC_CATALOG_LABELS.map((canonical_type) => ({ canonical_type })) },
+    { results: [] },
+    { results: [] },
+  ];
+}
+
+async function loadFreshWorker() {
+  const moduleUrl = new URL(`../worker/index.js?fresh=${Date.now()}_${Math.random()}`, import.meta.url);
+  const mod = await import(moduleUrl.href);
+  return mod.default;
 }
 
 test("q1/start rejects invalid first/last names", async () => {
@@ -923,6 +951,66 @@ test("Q1_DESCRIBE maps pet store owner phrasing to the canonical pet store label
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
   assert.match(body.prompt, /"pet store"/i);
+});
+
+test("Q1_DESCRIBE classifies `i own a <canonical>` across the static canonical catalog", async () => {
+  assert.equal(STATIC_CATALOG_LABELS.length, 100);
+  const freshWorker = await loadFreshWorker();
+
+  for (const label of STATIC_CATALOG_LABELS) {
+    const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+    const db = createMockDb({
+      firstResponses: [row, { m: 0 }, { m: 1 }],
+      allResponses: createStaticCatalogSnapshotResponses(),
+    });
+
+    const req = new Request("https://worker.example/q1/answer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: `ses_own_${label.replace(/\s+/g, "_")}`,
+        state: "Q1_DESCRIBE",
+        answer: `I own a ${label}`,
+      }),
+    });
+
+    const response = await freshWorker.fetch(req, { DB: db });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, `expected 200 for ${label}`);
+    assert.equal(body.next_state, "Q1_CONFIRM_TYPE", `expected confirm state for ${label}`);
+    assert.match(body.prompt, new RegExp(`"${escapeRegex(label)}"`, "i"), `expected prompt to include ${label}`);
+  }
+});
+
+test("Q1_DESCRIBE classifies `<canonical> owner` phrasing across the static canonical catalog", async () => {
+  assert.equal(STATIC_CATALOG_LABELS.length, 100);
+  const freshWorker = await loadFreshWorker();
+
+  for (const label of STATIC_CATALOG_LABELS) {
+    const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+    const db = createMockDb({
+      firstResponses: [row, { m: 0 }, { m: 1 }],
+      allResponses: createStaticCatalogSnapshotResponses(),
+    });
+
+    const req = new Request("https://worker.example/q1/answer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: `ses_owner_${label.replace(/\s+/g, "_")}`,
+        state: "Q1_DESCRIBE",
+        answer: `I am a ${label} owner`,
+      }),
+    });
+
+    const response = await freshWorker.fetch(req, { DB: db });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, `expected 200 for ${label}`);
+    assert.equal(body.next_state, "Q1_CONFIRM_TYPE", `expected confirm state for ${label}`);
+    assert.match(body.prompt, new RegExp(`"${escapeRegex(label)}"`, "i"), `expected prompt to include ${label}`);
+  }
 });
 
 test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () => {
@@ -1968,6 +2056,29 @@ test('Q2_CONFIRM_OWNERSHIP accepts "reference site" and routes into reference fe
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q3_FEEDBACK_OPEN");
   assert.match(body.prompt, /what do you like most about this site/i);
+});
+
+test('Q2_CONFIRM_OWNERSHIP treats "sure" as ambiguous and asks again', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://www.amazon.com/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_ownership_sure",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "sure",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.match(body.error, /current website|reference site/i);
 });
 
 test('Q2_CONFIRM_OWNERSHIP accepts natural reference phrasing like "one i like"', async () => {

@@ -42,7 +42,7 @@ function consumeEndpointRateLimit(ip, bucket, ts, windowMs, max) {
   return recent.length <= max;
 }
 
-export default {
+const worker = {
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -1360,6 +1360,7 @@ ul { margin: 0; padding-left: 18px; }
 
     function classifyWebsiteRelation(answer) {
       const t = String(answer || "").trim().toLowerCase();
+      const compact = t.replace(/[^a-z0-9]+/g, " ").trim();
       if (!t) return "unknown";
 
       if (
@@ -1378,9 +1379,8 @@ ul { margin: 0; padding-left: 18px; }
         return "current";
       }
 
-      const yn = yesNoMaybe(t);
-      if (yn === "yes") return "current";
-      if (yn === "no") return "reference";
+      if (/^(y|yes|yep|yup|yeah|yah)$/.test(compact)) return "current";
+      if (/^(n|no|nope|nah)$/.test(compact)) return "reference";
       return "unknown";
     }
 
@@ -1695,6 +1695,14 @@ ul { margin: 0; padding-left: 18px; }
       return 1;
     }
 
+    function phraseSpecificityBonus(text) {
+      const tokenCount = String(text || "")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean).length;
+      return Math.min(1, Math.max(0, tokenCount - 1) * 0.35);
+    }
+
     function includesPhrase(normalizedText, normalizedNeedle) {
       if (!normalizedText || !normalizedNeedle) return false;
       if (normalizedText === normalizedNeedle) return true;
@@ -1724,12 +1732,21 @@ ul { margin: 0; padding-left: 18px; }
         evidenceMap.set(canonical, list);
       }
 
+      for (const canonical of labels.values()) {
+        if (!includesPhrase(normalized, canonical)) continue;
+        pushEvidence(canonical, {
+          source: "label",
+          value: canonical,
+          weight: (normalized === canonical ? 5.25 : 4.75) + phraseSpecificityBonus(canonical),
+        });
+      }
+
       for (const [aliasPhrase, canonical] of aliases.entries()) {
         if (!labels.has(canonical) || !includesPhrase(normalized, aliasPhrase)) continue;
         pushEvidence(canonical, {
           source: "alias",
           value: aliasPhrase,
-          weight: normalized === aliasPhrase ? 5 : 4.5,
+          weight: (normalized === aliasPhrase ? 5 : 4.5) + phraseSpecificityBonus(aliasPhrase),
         });
       }
 
@@ -2040,7 +2057,10 @@ ul { margin: 0; padding-left: 18px; }
       if (/(coffee shop|coffeehouse|espresso bar)/.test(s)) return "coffee shop";
       if (/(cafe|café)/.test(s)) return "cafe";
       if (/(bakery|baker|pastries|pastry shop)/.test(s)) return "bakery";
+      if (/(nail salon|manicure|pedicure|acrylics|gel nails|nail tech)/.test(s)) return "nail salon";
       if (/(barbershop|barber shop|barber)/.test(s)) return "barbershop";
+      if (/(martial arts school|martial arts|dojo|karate|taekwondo|jiu jitsu|jiu-jitsu|judo|mma gym)/.test(s))
+        return "martial arts school";
       if (/(law firm|attorney|law office)/.test(s)) return "law firm";
       if (/(real estate|realty|realtor)/.test(s)) return "real estate agency";
       if (/(cleaning service|house cleaning|cleaning company|maid service)/.test(s)) return "cleaning service";
@@ -7576,3 +7596,5 @@ ul { margin: 0; padding-left: 18px; }
     return json({ ok: false, error: "Not Found" }, 404);
   },
 };
+
+export default worker;
