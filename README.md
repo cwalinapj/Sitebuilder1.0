@@ -4,6 +4,42 @@
 
 Static site builder that reads `business_profile.json`, auto-categorizes the business, and renders a deployable site into `/site`.
 
+## Local Requirements
+
+To run this repo locally, install:
+
+1. `Node.js` 20+ and `npm`
+2. `Python` 3.12+
+3. A Cloudflare account with `wrangler` access
+
+This repo uses `npx wrangler`, so a global Wrangler install is not required.
+
+## Local Setup
+
+Install JavaScript dependencies after cloning:
+
+```bash
+npm install
+```
+
+Log into Cloudflare before local worker dev or deploy:
+
+```bash
+npx wrangler login
+```
+
+If you are only working on the worker/frontend flow, that is enough.
+
+## Generated Folders
+
+These folders are generated locally and are now gitignored:
+
+1. `node_modules/`
+2. `solana/`
+3. `.wrangler/`
+
+They are not required in GitHub because they should be recreated locally from your toolchain and install steps.
+
 ## Build
 
 ```bash
