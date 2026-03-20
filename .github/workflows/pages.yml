@@ -1,57 +1,25 @@
-name: Build and Deploy Site
+name: Deploy Chat UI
 
 on:
   push:
     branches: [main]
+    paths:
+      - "public/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Build static site
-        run: python3 src/build.py
-
-      - name: Upload site artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: site
-          path: site
-
   deploy:
-    needs: build
     if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' && secrets.CLOUDFLARE_PROJECT_NAME != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-     - name: Build static site
-  run: |
-    python3 src/build.py
-    test -f site/index.html
-
-- name: Build previews
-  run: python3 src/build_preview.py
-
-- name: Deploy to Cloudflare Pages (Direct Upload)
-  uses: cloudflare/wrangler-action@v3
+      - name: Deploy public UI to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ secrets.CLOUDFLARE_PROJECT_NAME }}
-          directory: site
+          command: pages deploy ./public --project-name ${{ secrets.CLOUDFLARE_PROJECT_NAME }} --branch main
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
