@@ -165,11 +165,14 @@ Apply all migration files:
 - `migrations/0005_site_scan_link_audit.sql`
 - `migrations/0006_business_type_catalog.sql`
 - `migrations/0007_business_type_memory_import.sql`
+- `migrations/0008_business_type_alias_catalog.sql`
 
 `0006_business_type_catalog.sql` seeds the canonical approved business-type catalog in D1.
 It includes 100 active confirmed labels for normalization, analytics, and downstream template selection.
 
 `0007_business_type_memory_import.sql` imports the current distinct user-confirmed memory labels into the same D1 catalog table so they can be tracked and normalized centrally.
+
+`0008_business_type_alias_catalog.sql` adds an editable D1 alias table so business-type synonyms can be changed without a code deploy.
 
 ## Security Hardening (Implemented)
 

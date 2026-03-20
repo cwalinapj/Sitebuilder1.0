@@ -1443,6 +1443,7 @@ ul { margin: 0; padding-left: 18px; }
     const businessTypeCatalogCache = {
       loadedAt: 0,
       labels: null,
+      aliases: null,
     };
 
     function basicNormalizeBusinessTypeLabel(text) {
@@ -1459,42 +1460,66 @@ ul { margin: 0; padding-left: 18px; }
       return new Set(BUSINESS_TYPE_CATALOG.map((entry) => entry.label));
     }
 
-    async function getActiveBusinessTypeCatalogLabels() {
+    function fallbackBusinessTypeAliasMap() {
+      return new Map(BUSINESS_TYPE_ALIAS_TO_LABEL);
+    }
+
+    async function getBusinessTypeCatalogSnapshot() {
       const nowMs = Date.now();
-      if (businessTypeCatalogCache.labels && nowMs - businessTypeCatalogCache.loadedAt < 5 * 60 * 1000) {
-        return businessTypeCatalogCache.labels;
+      if (
+        businessTypeCatalogCache.labels &&
+        businessTypeCatalogCache.aliases &&
+        nowMs - businessTypeCatalogCache.loadedAt < 5 * 60 * 1000
+      ) {
+        return { labels: businessTypeCatalogCache.labels, aliases: businessTypeCatalogCache.aliases };
       }
 
       try {
-        const res = await env.DB.prepare(
+        const labelRes = await env.DB.prepare(
           "SELECT canonical_type FROM business_type_catalog WHERE is_active=1"
         ).bind().all();
         const labels = new Set(
-          (Array.isArray(res?.results) ? res.results : [])
+          (Array.isArray(labelRes?.results) ? labelRes.results : [])
             .map((row) => basicNormalizeBusinessTypeLabel(row?.canonical_type || ""))
             .filter(Boolean)
         );
+        let aliases = new Map();
+        try {
+          const aliasRes = await env.DB.prepare(
+            "SELECT alias_phrase, canonical_type FROM business_type_alias_catalog WHERE is_active=1"
+          ).bind().all();
+          aliases = new Map(
+            (Array.isArray(aliasRes?.results) ? aliasRes.results : [])
+              .map((row) => [
+                basicNormalizeBusinessTypeLabel(row?.alias_phrase || ""),
+                basicNormalizeBusinessTypeLabel(row?.canonical_type || ""),
+              ])
+              .filter(([alias, canonical]) => alias && canonical)
+          );
+        } catch {}
+
         if (labels.size) {
           businessTypeCatalogCache.labels = labels;
+          businessTypeCatalogCache.aliases = aliases.size ? aliases : fallbackBusinessTypeAliasMap();
           businessTypeCatalogCache.loadedAt = nowMs;
-          return labels;
+          return { labels: businessTypeCatalogCache.labels, aliases: businessTypeCatalogCache.aliases };
         }
       } catch {}
 
-      const fallback = fallbackBusinessTypeLabelSet();
-      businessTypeCatalogCache.labels = fallback;
+      businessTypeCatalogCache.labels = fallbackBusinessTypeLabelSet();
+      businessTypeCatalogCache.aliases = fallbackBusinessTypeAliasMap();
       businessTypeCatalogCache.loadedAt = nowMs;
-      return fallback;
+      return { labels: businessTypeCatalogCache.labels, aliases: businessTypeCatalogCache.aliases };
     }
 
     async function canonicalizeBusinessTypeLabel(text) {
       const normalized = basicNormalizeBusinessTypeLabel(text);
       if (!normalized) return normalized;
-      const catalogLabels = await getActiveBusinessTypeCatalogLabels();
-      if (catalogLabels.has(normalized)) return normalized;
+      const { labels, aliases } = await getBusinessTypeCatalogSnapshot();
+      if (labels.has(normalized)) return normalized;
 
-      const aliasMapped = BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
-      if (catalogLabels.has(aliasMapped)) return aliasMapped;
+      const aliasMapped = aliases.get(normalized) || BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
+      if (labels.has(aliasMapped)) return aliasMapped;
       return aliasMapped;
     }
 
@@ -3328,6 +3353,46 @@ ul { margin: 0; padding-left: 18px; }
         ok: true,
         turnstile_required: isTurnstileEnabled(),
         turnstile_site_key: isTurnstileEnabled() ? String(env.TURNSTILE_SITE_KEY || "") : null,
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/debug/business-types") {
+      const catalogRes = await env.DB.prepare(
+        "SELECT canonical_type, display_label, category, is_confirmed, is_active FROM business_type_catalog ORDER BY canonical_type ASC"
+      ).bind().all();
+
+      let aliasRes = { results: [] };
+      try {
+        aliasRes = await env.DB.prepare(
+          "SELECT alias_phrase, canonical_type, source, is_active FROM business_type_alias_catalog ORDER BY alias_phrase ASC"
+        ).bind().all();
+      } catch {}
+
+      const memoryRes = await env.DB.prepare(
+        `SELECT canonical_type, COUNT(*) AS phrase_count, SUM(confirmed_count) AS confirmation_count
+         FROM business_type_memory
+         GROUP BY canonical_type
+         ORDER BY canonical_type ASC`
+      ).bind().all();
+
+      const catalogRows = Array.isArray(catalogRes?.results) ? catalogRes.results : [];
+      const aliasRows = Array.isArray(aliasRes?.results) ? aliasRes.results : [];
+      const memoryRows = Array.isArray(memoryRes?.results) ? memoryRes.results : [];
+
+      return json({
+        ok: true,
+        counts: {
+          catalog_total: catalogRows.length,
+          catalog_confirmed: catalogRows.filter((row) => Number(row?.is_confirmed) === 1).length,
+          catalog_active_confirmed: catalogRows.filter(
+            (row) => Number(row?.is_confirmed) === 1 && Number(row?.is_active) === 1
+          ).length,
+          alias_total: aliasRows.length,
+          memory_label_total: memoryRows.length,
+        },
+        catalog: catalogRows,
+        aliases: aliasRows,
+        memory: memoryRows,
       });
     }
 

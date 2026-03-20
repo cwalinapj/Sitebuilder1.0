@@ -904,6 +904,10 @@ test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () =
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
   const db = createMockDb({
     firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "real estate agency" }] },
+      { results: [{ alias_phrase: "realtor", canonical_type: "real estate agency" }] },
+    ],
   });
 
   const req = new Request("https://worker.example/q1/answer", {
@@ -922,6 +926,39 @@ test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () =
   assert.equal(response.status, 200);
   assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
   assert.match(body.prompt, /"real estate agency"/i);
+});
+
+test("debug business-types endpoint returns catalog, aliases, and memory counts", async () => {
+  const db = createMockDb({
+    allResponses: [
+      {
+        results: [
+          { canonical_type: "restaurant", display_label: "Restaurant", category: "food_and_drink", is_confirmed: 1, is_active: 1 },
+          { canonical_type: "car", display_label: "Car", category: "needs_review", is_confirmed: 1, is_active: 0 },
+        ],
+      },
+      {
+        results: [
+          { alias_phrase: "realtor", canonical_type: "real estate agency", source: "seed", is_active: 1 },
+        ],
+      },
+      {
+        results: [
+          { canonical_type: "dive services", phrase_count: 6, confirmation_count: 10 },
+        ],
+      },
+    ],
+  });
+
+  const response = await worker.fetch(new Request("https://worker.example/debug/business-types"), { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.counts.catalog_total, 2);
+  assert.equal(body.counts.catalog_active_confirmed, 1);
+  assert.equal(body.counts.alias_total, 1);
+  assert.equal(body.counts.memory_label_total, 1);
 });
 
 test("worker blocks out-of-order state transitions", async () => {
