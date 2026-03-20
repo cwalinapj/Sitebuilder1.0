@@ -1440,13 +1440,66 @@ ul { margin: 0; padding-left: 18px; }
       return map;
     })();
 
-    function normalizeBusinessTypeLabel(text) {
+    const businessTypeCatalogCache = {
+      loadedAt: 0,
+      labels: null,
+    };
+
+    function basicNormalizeBusinessTypeLabel(text) {
       const normalized = String(text || "")
         .toLowerCase()
         .replace(/[^a-z0-9\s&/-]/g, " ")
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 80);
+      return normalized;
+    }
+
+    function fallbackBusinessTypeLabelSet() {
+      return new Set(BUSINESS_TYPE_CATALOG.map((entry) => entry.label));
+    }
+
+    async function getActiveBusinessTypeCatalogLabels() {
+      const nowMs = Date.now();
+      if (businessTypeCatalogCache.labels && nowMs - businessTypeCatalogCache.loadedAt < 5 * 60 * 1000) {
+        return businessTypeCatalogCache.labels;
+      }
+
+      try {
+        const res = await env.DB.prepare(
+          "SELECT canonical_type FROM business_type_catalog WHERE is_active=1"
+        ).bind().all();
+        const labels = new Set(
+          (Array.isArray(res?.results) ? res.results : [])
+            .map((row) => basicNormalizeBusinessTypeLabel(row?.canonical_type || ""))
+            .filter(Boolean)
+        );
+        if (labels.size) {
+          businessTypeCatalogCache.labels = labels;
+          businessTypeCatalogCache.loadedAt = nowMs;
+          return labels;
+        }
+      } catch {}
+
+      const fallback = fallbackBusinessTypeLabelSet();
+      businessTypeCatalogCache.labels = fallback;
+      businessTypeCatalogCache.loadedAt = nowMs;
+      return fallback;
+    }
+
+    async function canonicalizeBusinessTypeLabel(text) {
+      const normalized = basicNormalizeBusinessTypeLabel(text);
+      if (!normalized) return normalized;
+      const catalogLabels = await getActiveBusinessTypeCatalogLabels();
+      if (catalogLabels.has(normalized)) return normalized;
+
+      const aliasMapped = BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
+      if (catalogLabels.has(aliasMapped)) return aliasMapped;
+      return aliasMapped;
+    }
+
+    function normalizeBusinessTypeLabel(text) {
+      const normalized = basicNormalizeBusinessTypeLabel(text);
       return BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
     }
 
@@ -1612,10 +1665,12 @@ ul { margin: 0; padding-left: 18px; }
           data?.output?.map((o) => o?.content?.map((c) => c?.text || "").join("\n") || "").join("\n") ||
           "";
         const arr = extractJsonArrayFromText(output) || [];
-        return arr
-          .map((x) => normalizeBusinessTypeLabel(x))
-          .filter(Boolean)
-          .slice(0, limit);
+        const normalized = [];
+        for (const item of arr) {
+          const label = await canonicalizeBusinessTypeLabel(item);
+          if (label) normalized.push(label);
+        }
+        return normalized.slice(0, limit);
       } catch {
         return [];
       }
@@ -1630,7 +1685,7 @@ ul { margin: 0; padding-left: 18px; }
         )
           .bind(phrase)
           .first();
-        return normalizeBusinessTypeLabel(row?.canonical_type || "");
+        return await canonicalizeBusinessTypeLabel(row?.canonical_type || "");
       } catch {
         return null;
       }
@@ -1638,7 +1693,7 @@ ul { margin: 0; padding-left: 18px; }
 
     async function rememberBusinessType(description, canonical_type, source = "user_confirmed") {
       const phrase = normalizeBusinessPhrase(description);
-      const type = normalizeBusinessTypeLabel(canonical_type);
+      const type = await canonicalizeBusinessTypeLabel(canonical_type);
       if (!phrase || !type) return;
       try {
         await env.DB.prepare(
@@ -1661,21 +1716,20 @@ ul { margin: 0; padding-left: 18px; }
       const remembered = await getRememberedBusinessType(description);
       if (remembered) return { source: "remembered", candidates: [remembered] };
 
-      const deterministic = normalizeBusinessTypeLabel(guessBusinessType(description));
+      const deterministic = await canonicalizeBusinessTypeLabel(guessBusinessType(description));
       if (deterministic && deterministic !== "local business") {
         return { source: "heuristic", candidates: [deterministic] };
       }
 
       const fallback = fallbackSubtypeCandidates(description);
       const ai = await inferBusinessTypeCandidatesWithOpenAI(description, 3);
-      const candidates = Array.from(
-        new Set(
-          [...fallback, ...ai]
-            .map((x) => normalizeBusinessTypeLabel(x))
-            .filter(Boolean)
-            .filter((x) => x !== "local business")
-        )
-      ).slice(0, 3);
+      const merged = [...fallback, ...ai];
+      const normalized = [];
+      for (const item of merged) {
+        const label = await canonicalizeBusinessTypeLabel(item);
+        if (label && label !== "local business") normalized.push(label);
+      }
+      const candidates = Array.from(new Set(normalized)).slice(0, 3);
 
       if (!candidates.length) return { source: "fallback", candidates: ["local business"] };
       return { source: ai.length ? "openai" : "fallback", candidates };
@@ -5327,7 +5381,7 @@ ul { margin: 0; padding-left: 18px; }
           if (candidates[idx]) picked = candidates[idx];
         }
         if (!picked) {
-          picked = normalizeBusinessTypeLabel(answerText);
+          picked = await canonicalizeBusinessTypeLabel(answerText);
         }
         if (!picked) return json({ ok: false, error: friendlyChoiceError("1, 2, 3, or your exact business type") }, 400);
 
@@ -5357,7 +5411,7 @@ ul { margin: 0; padding-left: 18px; }
           return await reply({ ok: true, next_state: "Q1_TYPE_MANUAL", prompt: "What would you like me to call your business type?" });
         }
 
-        independent.business.type_final = normalizeBusinessTypeLabel(dependent.draft.type_guess);
+        independent.business.type_final = await canonicalizeBusinessTypeLabel(dependent.draft.type_guess);
         await rememberBusinessType(independent.business.description_raw, independent.business.type_final, dependent?.draft?.type_source || "user_confirmed");
 
         return await reply({
@@ -5369,7 +5423,7 @@ ul { margin: 0; padding-left: 18px; }
       }
 
       if (state === "Q1_TYPE_MANUAL") {
-        const t = normalizeBusinessTypeLabel(answerText);
+        const t = await canonicalizeBusinessTypeLabel(answerText);
         if (!t) return json({ ok: false, error: "Please provide a business type label." }, 400);
         dependent.draft.type_guess = t;
         dependent.draft.type_source = "manual";
