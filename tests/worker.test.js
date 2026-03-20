@@ -1135,6 +1135,74 @@ test('Q1_DESCRIBE maps "i sell clothes" to the canonical clothing store label', 
   assert.match(body.prompt, /"clothing store"/i);
 });
 
+test('Q1_DESCRIBE maps "i sell jewelry online" to jewelry store over generic online store', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "online store" }, { canonical_type: "jewelry store" }] },
+      { results: [] },
+      {
+        results: [
+          { id: 1, canonical_type: "online store", signal_type: "statement_pattern", value: "i sell", normalized_value: "i sell", weight: 1.8 },
+          { id: 2, canonical_type: "jewelry store", signal_type: "strong_keyword", value: "jewelry", normalized_value: "jewelry", weight: 2.3 },
+        ],
+      },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_jewelry_store",
+      state: "Q1_DESCRIBE",
+      answer: "i sell jewelry online",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"jewelry store"/i);
+});
+
+test('Q1_DESCRIBE maps "i sell flowers online" to flower shop over generic online store', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "online store" }, { canonical_type: "flower shop" }] },
+      { results: [] },
+      {
+        results: [
+          { id: 1, canonical_type: "online store", signal_type: "statement_pattern", value: "i sell", normalized_value: "i sell", weight: 1.8 },
+          { id: 2, canonical_type: "flower shop", signal_type: "strong_keyword", value: "flowers", normalized_value: "flowers", weight: 2.3 },
+        ],
+      },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_flower_shop",
+      state: "Q1_DESCRIBE",
+      answer: "i sell flowers online",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"flower shop"/i);
+});
+
 test("Q1_TYPE_MANUAL does not revive deleted static aliases when D1 alias set is empty", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
   const db = createMockDb({

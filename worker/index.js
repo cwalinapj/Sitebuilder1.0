@@ -2200,6 +2200,21 @@ ul { margin: 0; padding-left: 18px; }
       if (remembered) return { source: "remembered", candidates: [remembered] };
 
       const classified = await classifyBusinessTypeFromCatalog(description);
+      const retailOverride = detectSpecificRetailProductType(description);
+      if (retailOverride && classified.business_type === "online store") {
+        const ranked = [
+          retailOverride,
+          ...classified.ranked.map((item) => item.business_type).filter((item) => item !== retailOverride),
+        ].slice(0, 3);
+        return {
+          source: "catalog_retail_override",
+          candidates: ranked,
+          classification: {
+            ...classified,
+            business_type: retailOverride,
+          },
+        };
+      }
       if (classified.business_type && classified.confidence >= 0.55) {
         return {
           source: "catalog",
@@ -2225,6 +2240,27 @@ ul { margin: 0; padding-left: 18px; }
 
       if (!candidates.length) return { source: "fallback", candidates: ["professional services business"] };
       return { source: ai.length ? "openai" : "fallback", candidates };
+    }
+
+    function detectSpecificRetailProductType(desc) {
+      const s = String(desc || "").toLowerCase();
+      const retailMatchers = [
+        ["clothing store", /\b(clothes|clothing|apparel|streetwear|fashion boutique|fashion store|womenswear|menswear)\b/],
+        ["jewelry store", /\b(jewelry|jewellery|rings|necklaces|bracelets|earrings|engagement rings)\b/],
+        ["flower shop", /\b(florist|flowers|bouquets|arrangements|wedding flowers|flower delivery)\b/],
+        ["bookstore", /\b(bookstore|book store|books|novels|used books|bookshop)\b/],
+        ["electronics store", /\b(electronics|gadgets|computers|phones|tech accessories|devices)\b/],
+        ["pet store", /\b(pet store|pet shop|pet supplies|pet food|dog supplies|cat toys|aquarium supplies)\b/],
+        ["furniture store", /\b(furniture|sofas|tables|chairs|home furnishings|showroom)\b/],
+        ["gift shop", /\b(gift shop|gifts|souvenirs|novelty items|local gifts)\b/],
+        ["grocery store", /\b(grocery|supermarket|produce|pantry|food market|organic grocery)\b/],
+        ["convenience store", /\b(convenience store|corner store|mini mart|minimart|bodega|snack shop)\b/],
+      ];
+
+      for (const [label, pattern] of retailMatchers) {
+        if (pattern.test(s)) return label;
+      }
+      return null;
     }
 
     async function resolveBusinessSubtype(description, canonicalType) {
@@ -2259,6 +2295,10 @@ ul { margin: 0; padding-left: 18px; }
       if (/(cafe|café)/.test(s)) return "cafe";
       if (/(bakery|baker|pastries|pastry shop)/.test(s)) return "bakery";
       if (/(sell clothes|selling clothes|clothes shop|clothing store|apparel store|fashion store|streetwear)/.test(s)) return "clothing store";
+      if (/(sell jewelry|selling jewelry|jewelry store|jewellery store|engagement rings|rings|necklaces|bracelets|earrings)/.test(s))
+        return "jewelry store";
+      if (/(sell flowers|selling flowers|flower shop|florist|bouquets|flower delivery|wedding flowers)/.test(s))
+        return "flower shop";
       if (/(nail salon|manicure|pedicure|acrylics|gel nails|nail tech)/.test(s)) return "nail salon";
       if (/(barbershop|barber shop|barber)/.test(s)) return "barbershop";
       if (/(martial arts school|martial arts|dojo|karate|taekwondo|jiu jitsu|jiu-jitsu|judo|mma gym)/.test(s))
