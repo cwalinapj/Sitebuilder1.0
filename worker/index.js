@@ -1562,11 +1562,19 @@ ul { margin: 0; padding-left: 18px; }
       signals: null,
       source: null,
     };
+    const businessSubtypeCatalogCache = {
+      loadedAt: 0,
+      subtypes: null,
+      aliases: null,
+      signals: null,
+      source: null,
+    };
 
     function basicNormalizeBusinessTypeLabel(text) {
       const normalized = String(text || "")
         .toLowerCase()
         .replace(/[^a-z0-9\s&/-]/g, " ")
+        .replace(/^(a|an|the)\s+/g, "")
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 80);
@@ -1666,6 +1674,99 @@ ul { margin: 0; padding-left: 18px; }
         aliases: businessTypeCatalogCache.aliases,
         signals: businessTypeCatalogCache.signals,
         source: businessTypeCatalogCache.source,
+      };
+    }
+
+    async function getBusinessSubtypeCatalogSnapshot() {
+      const nowMs = Date.now();
+      if (
+        businessSubtypeCatalogCache.subtypes &&
+        businessSubtypeCatalogCache.aliases &&
+        businessSubtypeCatalogCache.signals &&
+        nowMs - businessSubtypeCatalogCache.loadedAt < 5 * 60 * 1000
+      ) {
+        return {
+          subtypes: businessSubtypeCatalogCache.subtypes,
+          aliases: businessSubtypeCatalogCache.aliases,
+          signals: businessSubtypeCatalogCache.signals,
+          source: businessSubtypeCatalogCache.source,
+        };
+      }
+
+      try {
+        const subtypeRes = await env.DB.prepare(
+          `SELECT subtype_key, canonical_type, display_label, category
+             FROM business_type_subtype_catalog
+            WHERE is_active=1`
+        ).bind().all();
+        const subtypes = (Array.isArray(subtypeRes?.results) ? subtypeRes.results : [])
+          .map((row) => ({
+            subtype_key: basicNormalizeBusinessTypeLabel(row?.subtype_key || ""),
+            canonical_type: basicNormalizeBusinessTypeLabel(row?.canonical_type || ""),
+            display_label: String(row?.display_label || ""),
+            category: String(row?.category || ""),
+          }))
+          .filter((row) => row.subtype_key && row.canonical_type);
+
+        let aliases = new Map();
+        let signals = [];
+        try {
+          const aliasRes = await env.DB.prepare(
+            `SELECT alias_phrase, subtype_key
+               FROM business_type_subtype_alias_catalog
+              WHERE is_active=1`
+          ).bind().all();
+          aliases = new Map(
+            (Array.isArray(aliasRes?.results) ? aliasRes.results : [])
+              .map((row) => [basicNormalizeBusinessTypeLabel(row?.alias_phrase || ""), basicNormalizeBusinessTypeLabel(row?.subtype_key || "")])
+              .filter(([alias, subtype_key]) => alias && subtype_key)
+          );
+        } catch {
+          aliases = new Map();
+        }
+        try {
+          const signalRes = await env.DB.prepare(
+            `SELECT id, subtype_key, signal_type, value, normalized_value, weight
+               FROM business_type_subtype_signal_catalog
+              WHERE is_active=1`
+          ).bind().all();
+          signals = (Array.isArray(signalRes?.results) ? signalRes.results : [])
+            .map((row) => ({
+              id: Number(row?.id || 0),
+              subtype_key: basicNormalizeBusinessTypeLabel(row?.subtype_key || ""),
+              signal_type: String(row?.signal_type || ""),
+              value: String(row?.value || ""),
+              normalized_value: basicNormalizeBusinessTypeLabel(row?.normalized_value || row?.value || ""),
+              weight: Number(row?.weight ?? 1),
+            }))
+            .filter((row) => row.subtype_key && row.signal_type && row.normalized_value);
+        } catch {
+          signals = [];
+        }
+
+        businessSubtypeCatalogCache.subtypes = subtypes;
+        businessSubtypeCatalogCache.aliases = aliases;
+        businessSubtypeCatalogCache.signals = signals;
+        businessSubtypeCatalogCache.loadedAt = nowMs;
+        businessSubtypeCatalogCache.source = "d1";
+        return {
+          subtypes: businessSubtypeCatalogCache.subtypes,
+          aliases: businessSubtypeCatalogCache.aliases,
+          signals: businessSubtypeCatalogCache.signals,
+          source: businessSubtypeCatalogCache.source,
+        };
+      } catch {}
+
+      businessSubtypeCatalogCache.subtypes = [];
+      businessSubtypeCatalogCache.aliases = new Map();
+      businessSubtypeCatalogCache.signals = [];
+      businessSubtypeCatalogCache.loadedAt = nowMs;
+      businessSubtypeCatalogCache.source = "fallback";
+      return {
+        subtypes: businessSubtypeCatalogCache.subtypes,
+        aliases: businessSubtypeCatalogCache.aliases,
+        signals: businessSubtypeCatalogCache.signals,
+        source: businessSubtypeCatalogCache.source,
       };
     }
 
@@ -1795,6 +1896,92 @@ ul { margin: 0; padding-left: 18px; }
         confidence,
         evidence: best.evidence.slice(0, 5),
         location,
+        ranked,
+      };
+    }
+
+    async function classifyBusinessSubtypeFromCatalog(description, canonicalType) {
+      const canonical = basicNormalizeBusinessTypeLabel(canonicalType);
+      if (!canonical) return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+
+      const raw = String(description || "").trim();
+      const normalized = normalizeBusinessPhrase(raw);
+      if (!normalized) return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+
+      const { subtypes, aliases, signals } = await getBusinessSubtypeCatalogSnapshot();
+      const subtypeRows = (Array.isArray(subtypes) ? subtypes : []).filter((row) => row.canonical_type === canonical);
+      if (!subtypeRows.length) return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+
+      const subtypeMap = new Map(subtypeRows.map((row) => [row.subtype_key, row]));
+      const scores = new Map();
+      const evidenceMap = new Map();
+
+      function pushEvidence(subtypeKey, evidence) {
+        if (!subtypeMap.has(subtypeKey)) return;
+        const currentScore = scores.get(subtypeKey) || 0;
+        scores.set(subtypeKey, currentScore + Number(evidence.weight || 0));
+        const list = evidenceMap.get(subtypeKey) || [];
+        list.push(evidence);
+        evidenceMap.set(subtypeKey, list);
+      }
+
+      for (const row of subtypeRows) {
+        if (!includesPhrase(normalized, row.subtype_key)) continue;
+        pushEvidence(row.subtype_key, {
+          source: "label",
+          value: row.subtype_key,
+          weight: (normalized === row.subtype_key ? 5.25 : 4.75) + phraseSpecificityBonus(row.subtype_key),
+        });
+      }
+
+      for (const [aliasPhrase, subtypeKey] of aliases.entries()) {
+        if (!subtypeMap.has(subtypeKey) || !includesPhrase(normalized, aliasPhrase)) continue;
+        pushEvidence(subtypeKey, {
+          source: "alias",
+          value: aliasPhrase,
+          weight: (normalized === aliasPhrase ? 5 : 4.5) + phraseSpecificityBonus(aliasPhrase),
+        });
+      }
+
+      for (const signal of Array.isArray(signals) ? signals : []) {
+        if (!subtypeMap.has(signal.subtype_key)) continue;
+        const normalizedValue = signal.normalized_value;
+        if (!normalizedValue) continue;
+
+        let matched = false;
+        if (signal.signal_type === "statement_prefix") matched = normalized.startsWith(normalizedValue);
+        else matched = includesPhrase(normalized, normalizedValue);
+        if (!matched) continue;
+
+        const weight = Number.isFinite(signal.weight) ? signal.weight : signalWeightDefault(signal.signal_type);
+        pushEvidence(signal.subtype_key, {
+          source: "signal",
+          signal_type: signal.signal_type,
+          value: signal.value || normalizedValue,
+          weight,
+        });
+      }
+
+      const ranked = Array.from(scores.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([subtype_key, score]) => ({
+          subtype_key,
+          score,
+          display_label: subtypeMap.get(subtype_key)?.display_label || subtype_key,
+          evidence: (evidenceMap.get(subtype_key) || []).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight)),
+        }));
+
+      if (!ranked.length || ranked[0].score <= 0) {
+        return { subtype_key: null, confidence: 0, evidence: [], ranked: [] };
+      }
+
+      const best = ranked[0];
+      const runnerUpScore = ranked[1]?.score || 0;
+      const confidence = Math.max(0.35, Math.min(0.99, best.score / Math.max(best.score + runnerUpScore + 1, 1)));
+      return {
+        subtype_key: best.subtype_key,
+        confidence,
+        evidence: best.evidence.slice(0, 5),
         ranked,
       };
     }
@@ -2040,6 +2227,20 @@ ul { margin: 0; padding-left: 18px; }
       return { source: ai.length ? "openai" : "fallback", candidates };
     }
 
+    async function resolveBusinessSubtype(description, canonicalType) {
+      const canonical = await canonicalizeBusinessTypeLabel(canonicalType);
+      if (!canonical) return null;
+      const classified = await classifyBusinessSubtypeFromCatalog(description, canonical);
+      if (!classified?.subtype_key || classified.confidence < 0.55) return null;
+      return {
+        source: "catalog",
+        subtype_key: classified.subtype_key,
+        confidence: classified.confidence,
+        evidence: classified.evidence,
+        ranked: classified.ranked,
+      };
+    }
+
     function guessBusinessType(desc) {
       const s = (desc || "").toLowerCase();
       if (/(web3|web 3|blockchain|crypto|solana|ethereum|evm|smart contract|dapp|dao|defi|nft)/.test(s)) {
@@ -2057,6 +2258,7 @@ ul { margin: 0; padding-left: 18px; }
       if (/(coffee shop|coffeehouse|espresso bar)/.test(s)) return "coffee shop";
       if (/(cafe|café)/.test(s)) return "cafe";
       if (/(bakery|baker|pastries|pastry shop)/.test(s)) return "bakery";
+      if (/(sell clothes|selling clothes|clothes shop|clothing store|apparel store|fashion store|streetwear)/.test(s)) return "clothing store";
       if (/(nail salon|manicure|pedicure|acrylics|gel nails|nail tech)/.test(s)) return "nail salon";
       if (/(barbershop|barber shop|barber)/.test(s)) return "barbershop";
       if (/(martial arts school|martial arts|dojo|karate|taekwondo|jiu jitsu|jiu-jitsu|judo|mma gym)/.test(s))
@@ -3435,6 +3637,10 @@ ul { margin: 0; padding-left: 18px; }
       businessTypeCatalogCache.labels = null;
       businessTypeCatalogCache.aliases = null;
       businessTypeCatalogCache.signals = null;
+      businessSubtypeCatalogCache.loadedAt = 0;
+      businessSubtypeCatalogCache.subtypes = null;
+      businessSubtypeCatalogCache.aliases = null;
+      businessSubtypeCatalogCache.signals = null;
     }
 
     async function listAdminBusinessTypes() {
@@ -4054,6 +4260,30 @@ ul { margin: 0; padding-left: 18px; }
            ORDER BY canonical_type ASC, signal_type ASC, value ASC`
         ).bind().all();
       } catch {}
+      let subtypeRes = { results: [] };
+      try {
+        subtypeRes = await env.DB.prepare(
+          `SELECT subtype_key, canonical_type, display_label, category, is_active
+           FROM business_type_subtype_catalog
+           ORDER BY canonical_type ASC, subtype_key ASC`
+        ).bind().all();
+      } catch {}
+      let subtypeAliasRes = { results: [] };
+      try {
+        subtypeAliasRes = await env.DB.prepare(
+          `SELECT alias_phrase, subtype_key, source, is_active
+           FROM business_type_subtype_alias_catalog
+           ORDER BY alias_phrase ASC`
+        ).bind().all();
+      } catch {}
+      let subtypeSignalRes = { results: [] };
+      try {
+        subtypeSignalRes = await env.DB.prepare(
+          `SELECT id, subtype_key, signal_type, value, normalized_value, weight, is_active
+           FROM business_type_subtype_signal_catalog
+           ORDER BY subtype_key ASC, signal_type ASC, value ASC`
+        ).bind().all();
+      } catch {}
 
       const memoryRes = await env.DB.prepare(
         `SELECT canonical_type, COUNT(*) AS phrase_count, SUM(confirmed_count) AS confirmation_count
@@ -4065,6 +4295,9 @@ ul { margin: 0; padding-left: 18px; }
       const catalogRows = Array.isArray(catalogRes?.results) ? catalogRes.results : [];
       const aliasRows = Array.isArray(aliasRes?.results) ? aliasRes.results : [];
       const signalRows = Array.isArray(signalRes?.results) ? signalRes.results : [];
+      const subtypeRows = Array.isArray(subtypeRes?.results) ? subtypeRes.results : [];
+      const subtypeAliasRows = Array.isArray(subtypeAliasRes?.results) ? subtypeAliasRes.results : [];
+      const subtypeSignalRows = Array.isArray(subtypeSignalRes?.results) ? subtypeSignalRes.results : [];
       const memoryRows = Array.isArray(memoryRes?.results) ? memoryRes.results : [];
 
       return json({
@@ -4077,11 +4310,17 @@ ul { margin: 0; padding-left: 18px; }
           ).length,
           alias_total: aliasRows.length,
           signal_total: signalRows.length,
+          subtype_total: subtypeRows.length,
+          subtype_alias_total: subtypeAliasRows.length,
+          subtype_signal_total: subtypeSignalRows.length,
           memory_label_total: memoryRows.length,
         },
         catalog: catalogRows,
         aliases: aliasRows,
         signals: signalRows,
+        subtypes: subtypeRows,
+        subtype_aliases: subtypeAliasRows,
+        subtype_signals: subtypeSignalRows,
         memory: memoryRows,
       });
     }
@@ -5450,6 +5689,7 @@ ul { margin: 0; padding-left: 18px; }
         business: {
           description_raw: null,
           type_final: null,
+          subtype_final: null,
           own_site_url: null,
           own_site_confirmed: null,
           reference_site_url: null,
@@ -6065,7 +6305,10 @@ ul { margin: 0; padding-left: 18px; }
         independent.business.description_raw = brief;
         dependent.draft.type_guess = "wordpress plugin company";
         dependent.draft.type_source = "entry_path";
+        dependent.draft.subtype_guess = null;
+        dependent.draft.subtype_source = null;
         independent.business.type_final = "wordpress plugin company";
+        independent.business.subtype_final = null;
         if (!independent.build.goal) independent.build.goal = "Sell a WordPress plugin with clear CTA and trust signals";
         return await reply({
           ok: true,
@@ -6105,6 +6348,10 @@ ul { margin: 0; padding-left: 18px; }
         dependent.draft.type_candidates = resolved.candidates;
         dependent.draft.type_source = resolved.source;
         dependent.draft.type_guess = resolved.candidates[0] || "local business";
+        dependent.draft.subtype_guess = null;
+        dependent.draft.subtype_source = null;
+        dependent.draft.subtype_confidence = null;
+        dependent.draft.subtype_evidence = [];
         if (resolved.classification) {
           dependent.draft.type_confidence = resolved.classification.confidence;
           dependent.draft.type_evidence = resolved.classification.evidence;
@@ -6114,6 +6361,15 @@ ul { margin: 0; padding-left: 18px; }
           if ((!dependent.research || !dependent.research.location_hint) && resolved.classification.location) {
             dependent.research = dependent.research || {};
             dependent.research.location_hint = resolved.classification.location;
+          }
+        }
+        if (dependent.draft.type_guess) {
+          const subtypeResolved = await resolveBusinessSubtype(desc, dependent.draft.type_guess);
+          if (subtypeResolved?.subtype_key) {
+            dependent.draft.subtype_guess = subtypeResolved.subtype_key;
+            dependent.draft.subtype_source = subtypeResolved.source;
+            dependent.draft.subtype_confidence = subtypeResolved.confidence;
+            dependent.draft.subtype_evidence = subtypeResolved.evidence;
           }
         }
 
@@ -6152,6 +6408,17 @@ ul { margin: 0; padding-left: 18px; }
         if (!picked) return json({ ok: false, error: friendlyChoiceError("1, 2, 3, or your exact business type") }, 400);
 
         dependent.draft.type_guess = picked;
+        dependent.draft.subtype_guess = null;
+        dependent.draft.subtype_source = null;
+        dependent.draft.subtype_confidence = null;
+        dependent.draft.subtype_evidence = [];
+        const subtypeResolved = await resolveBusinessSubtype(independent?.business?.description_raw || "", picked);
+        if (subtypeResolved?.subtype_key) {
+          dependent.draft.subtype_guess = subtypeResolved.subtype_key;
+          dependent.draft.subtype_source = subtypeResolved.source;
+          dependent.draft.subtype_confidence = subtypeResolved.confidence;
+          dependent.draft.subtype_evidence = subtypeResolved.evidence;
+        }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",
@@ -6178,6 +6445,7 @@ ul { margin: 0; padding-left: 18px; }
         }
 
         independent.business.type_final = await canonicalizeBusinessTypeLabel(dependent.draft.type_guess);
+        independent.business.subtype_final = dependent.draft.subtype_guess || null;
         await rememberBusinessType(independent.business.description_raw, independent.business.type_final, dependent?.draft?.type_source || "user_confirmed");
 
         return await reply({
@@ -6193,6 +6461,17 @@ ul { margin: 0; padding-left: 18px; }
         if (!t) return json({ ok: false, error: "Please provide a business type label." }, 400);
         dependent.draft.type_guess = t;
         dependent.draft.type_source = "manual";
+        dependent.draft.subtype_guess = null;
+        dependent.draft.subtype_source = null;
+        dependent.draft.subtype_confidence = null;
+        dependent.draft.subtype_evidence = [];
+        const subtypeResolved = await resolveBusinessSubtype(independent?.business?.description_raw || "", t);
+        if (subtypeResolved?.subtype_key) {
+          dependent.draft.subtype_guess = subtypeResolved.subtype_key;
+          dependent.draft.subtype_source = subtypeResolved.source;
+          dependent.draft.subtype_confidence = subtypeResolved.confidence;
+          dependent.draft.subtype_evidence = subtypeResolved.evidence;
+        }
         return await reply({
           ok: true,
           next_state: "Q1_CONFIRM_TYPE",

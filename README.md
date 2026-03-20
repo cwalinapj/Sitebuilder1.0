@@ -167,6 +167,7 @@ Apply all migration files:
 - `migrations/0007_business_type_memory_import.sql`
 - `migrations/0008_business_type_alias_catalog.sql`
 - `migrations/0009_business_type_signal_catalog.sql`
+- `migrations/0010_business_type_subtype_catalog.sql`
 
 `0006_business_type_catalog.sql` seeds the canonical approved business-type catalog in D1.
 It includes 100 active confirmed labels for normalization, analytics, and downstream template selection.
@@ -177,6 +178,10 @@ It includes 100 active confirmed labels for normalization, analytics, and downst
 
 `0009_business_type_signal_catalog.sql` adds a D1-backed signal catalog plus `admin_audit_log`.
 This is used for data-driven business-type scoring from natural user language like profession, service, product, and industry terms.
+
+`0010_business_type_subtype_catalog.sql` adds a second-layer subtype system in D1.
+Canonical type remains the top-level label, while subtype stores a more specific vertical underneath it.
+The first seeded chunk covers food and beverage subtype expansion such as `pizzeria`, `steakhouse`, `juice bar`, and `meal prep service`.
 
 ## Business Type Admin Endpoints
 

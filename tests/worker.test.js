@@ -43,6 +43,7 @@ function buildSessionRow({ ownSiteUrl = "https://acme.example", sitePlatform = n
       person: { first_name: "Paul", last_name: "Cwalina", geo: { city: "Miami", region: "FL", country: "US" } },
       business: {
         type_final: "dive services",
+        subtype_final: null,
         own_site_url: ownSiteUrl,
         site_platform: sitePlatform,
         is_wordpress: isWordpress,
@@ -953,6 +954,43 @@ test("Q1_DESCRIBE maps pet store owner phrasing to the canonical pet store label
   assert.match(body.prompt, /"pet store"/i);
 });
 
+test("Q1_DESCRIBE stores subtype when a canonical subtype match is found", async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "restaurant" }] },
+      { results: [] },
+      { results: [] },
+      { results: [{ subtype_key: "pizzeria", canonical_type: "restaurant", display_label: "Pizzeria", category: "food_and_beverage_expansion" }] },
+      { results: [{ alias_phrase: "pizza place", subtype_key: "pizzeria" }] },
+      { results: [{ id: 1, subtype_key: "pizzeria", signal_type: "strong_keyword", value: "pizza", normalized_value: "pizza", weight: 3 }] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_pizzeria",
+      state: "Q1_DESCRIBE",
+      answer: "I run a pizza place",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"restaurant"/i);
+
+  const upsert = db.statements.find((s) => /INSERT INTO session_vars/.test(s.sql));
+  assert.ok(upsert, "expected session_vars upsert");
+  const dependentJson = String(upsert.params[3] || "");
+  assert.match(dependentJson, /"subtype_guess":"pizzeria"/);
+});
+
 test("Q1_DESCRIBE classifies `i own a <canonical>` across the static canonical catalog", async () => {
   assert.equal(STATIC_CATALOG_LABELS.length, 100);
   const freshWorker = await loadFreshWorker();
@@ -1041,6 +1079,62 @@ test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () =
   assert.match(body.prompt, /"real estate agency"/i);
 });
 
+test('Q1_TYPE_MANUAL strips leading article from "a clothing store"', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      { results: [{ canonical_type: "clothing store" }] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+      { results: [] },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_clothing_manual",
+      state: "Q1_TYPE_MANUAL",
+      answer: "a clothing store",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"clothing store"/i);
+});
+
+test('Q1_DESCRIBE maps "i sell clothes" to the canonical clothing store label', async () => {
+  const row = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [row, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_clothing_store",
+      state: "Q1_DESCRIBE",
+      answer: "i sell clothes",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"clothing store"/i);
+});
+
 test("Q1_TYPE_MANUAL does not revive deleted static aliases when D1 alias set is empty", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
   const db = createMockDb({
@@ -1117,6 +1211,9 @@ test("debug business-types endpoint returns catalog, aliases, and memory counts"
       {
         results: [],
       },
+      { results: [] },
+      { results: [] },
+      { results: [] },
       {
         results: [
           { canonical_type: "dive services", phrase_count: 6, confirmation_count: 10 },
@@ -1133,6 +1230,7 @@ test("debug business-types endpoint returns catalog, aliases, and memory counts"
   assert.equal(body.counts.catalog_total, 2);
   assert.equal(body.counts.catalog_active_confirmed, 1);
   assert.equal(body.counts.alias_total, 1);
+  assert.equal(body.counts.subtype_total, 0);
   assert.equal(body.counts.memory_label_total, 1);
 });
 
@@ -1150,6 +1248,9 @@ test("debug business-types endpoint includes signal counts", async () => {
           { id: 1, canonical_type: "restaurant", signal_type: "strong_keyword", value: "burger joint", normalized_value: "burger joint", weight: 2.7, is_active: 1 },
         ],
       },
+      { results: [] },
+      { results: [] },
+      { results: [] },
       { results: [] },
     ],
   });
