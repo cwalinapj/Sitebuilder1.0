@@ -1806,6 +1806,33 @@ test("admin customer lookup returns customer by session_id", async () => {
   assert.equal(body.items[0].match_type, "session_id");
 });
 
+test("admin customer lookup returns customer by wallet", async () => {
+  const db = createMockDb({
+    firstResponses: [
+      {
+        customer_id: "cus_wallet",
+        wallet_address: "0xabc123",
+        wallet_chain_id: 137,
+        matched_identity_type: "wallet",
+        matched_identity_value: "137:0xabc123",
+      },
+    ],
+  });
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/customers/lookup?wallet=0xAbC123&wallet_chain_id=137", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.count, 1);
+  assert.equal(body.items[0].customer_id, "cus_wallet");
+  assert.equal(body.items[0].matched_identity_type, "wallet");
+  assert.equal(body.query.wallet, "137:0xabc123");
+});
+
 test("Q1_DESCRIBE uses D1 signal evidence to classify family lawyer correctly", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
   const db = createMockDb({

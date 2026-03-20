@@ -45,6 +45,10 @@ Supported query params:
 - `wallet_chain_id`
 - `session_id`
 
+Internal admin page:
+
+- [customers.html](/Users/root1/Sitebuilder1.0/public/admin/customers.html)
+
 Example:
 
 ```bash
@@ -64,6 +68,7 @@ The following tests pass in [worker.test.js](/Users/root1/Sitebuilder1.0/tests/w
 - `admin customer lookup requires a query key`
 - `admin customer lookup returns customer by email`
 - `admin customer lookup returns customer by session_id`
+- `admin customer lookup returns customer by wallet`
 
 Test command:
 
