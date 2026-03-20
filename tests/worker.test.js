@@ -845,6 +845,85 @@ test("Q1_DESCRIBE uses OpenAI candidates when deterministic type is too broad", 
   }
 });
 
+test("Q1_DESCRIBE extracts dependent location from the business sentence", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_20_location",
+      state: "Q1_DESCRIBE",
+      answer: "scuba dive guide in Lake Tahoe",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /dive services/i);
+
+  const upsert = db.statements.find((s) => /INSERT INTO session_vars/.test(s.sql));
+  assert.ok(upsert, "expected session_vars upsert");
+  const independentJson = String(upsert.params[2] || "");
+  const dependentJson = String(upsert.params[3] || "");
+  assert.match(independentJson, /"service_area":"Lake Tahoe"/);
+  assert.match(dependentJson, /"location_hint":"Lake Tahoe"/);
+});
+
+test("Q1_DESCRIBE maps barber phrasing to the canonical barbershop label", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_20_barber",
+      state: "Q1_DESCRIBE",
+      answer: "I am a barber in Reno",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"barbershop"/i);
+});
+
+test("Q1_TYPE_MANUAL normalizes aliases to canonical catalog labels", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_TYPE_MANUAL");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_20_manual_alias",
+      state: "Q1_TYPE_MANUAL",
+      answer: "realtor",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /"real estate agency"/i);
+});
+
 test("worker blocks out-of-order state transitions", async () => {
   const sessionRow = withExpectedState(buildSessionRow(), "Q1_DESCRIBE");
   const db = createMockDb({

@@ -1292,13 +1292,162 @@ ul { margin: 0; padding-left: 18px; }
         .slice(0, 180);
     }
 
+    function extractLocationFromBusinessDescription(text) {
+      const raw = String(text || "").trim();
+      if (!raw) return null;
+
+      const patterns = [
+        /\b(?:in|around|near|serving|serve|based in|located in|out of)\s+([a-z][a-z\s,.'-]{2,80})$/i,
+        /\b(?:in|around|near|serving|serve|based in|located in|out of)\s+([a-z][a-z\s,.'-]{2,80})\b/i,
+      ];
+
+      for (const pattern of patterns) {
+        const match = raw.match(pattern);
+        if (!match?.[1]) continue;
+        let location = match[1]
+          .replace(/\b(with|who|that|and|offering|offers|for)\b.*$/i, "")
+          .replace(/[.,;:]+$/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (!location) continue;
+        if (location.split(/\s+/).length > 8) continue;
+        return location;
+      }
+
+      return null;
+    }
+
+    const BUSINESS_TYPE_CATALOG = [
+      { label: "restaurant", aliases: ["diner", "bistro", "eatery"] },
+      { label: "cafe", aliases: ["café"] },
+      { label: "coffee shop", aliases: ["coffeehouse"] },
+      { label: "bakery", aliases: [] },
+      { label: "bar", aliases: ["pub", "tavern"] },
+      { label: "brewery", aliases: [] },
+      { label: "winery", aliases: [] },
+      { label: "food truck", aliases: [] },
+      { label: "catering business", aliases: ["caterer", "catering company"] },
+      { label: "grocery store", aliases: ["market", "supermarket"] },
+      { label: "convenience store", aliases: ["corner store", "mini mart", "minimart"] },
+      { label: "clothing store", aliases: ["apparel store"] },
+      { label: "jewelry store", aliases: ["jewellery store"] },
+      { label: "gift shop", aliases: [] },
+      { label: "bookstore", aliases: ["book store"] },
+      { label: "flower shop", aliases: ["florist"] },
+      { label: "furniture store", aliases: [] },
+      { label: "electronics store", aliases: ["electronics shop"] },
+      { label: "pet store", aliases: ["pet shop"] },
+      { label: "online store", aliases: ["ecommerce store", "e-commerce store"] },
+      { label: "boutique", aliases: [] },
+      { label: "salon", aliases: ["beauty salon"] },
+      { label: "barbershop", aliases: ["barber shop", "barber"] },
+      { label: "spa", aliases: ["day spa"] },
+      { label: "nail salon", aliases: [] },
+      { label: "massage therapy", aliases: ["massage therapist", "massage studio"] },
+      { label: "skincare clinic", aliases: ["skin care clinic", "esthetic clinic", "aesthetics clinic"] },
+      { label: "makeup artist", aliases: ["make-up artist", "mua"] },
+      { label: "hair stylist", aliases: ["hairstylist", "hair salon"] },
+      { label: "tattoo studio", aliases: ["tattoo shop"] },
+      { label: "medical clinic", aliases: ["doctor office", "doctor's office"] },
+      { label: "dental office", aliases: ["dentist", "dental clinic"] },
+      { label: "chiropractic clinic", aliases: ["chiropractor"] },
+      { label: "physical therapy clinic", aliases: ["physical therapist", "pt clinic"] },
+      { label: "counseling practice", aliases: ["counselling practice", "counselor", "counsellor"] },
+      { label: "therapy practice", aliases: ["therapist", "psychotherapy practice"] },
+      { label: "veterinary clinic", aliases: ["vet clinic", "animal hospital"] },
+      { label: "pharmacy", aliases: ["drugstore"] },
+      { label: "fitness studio", aliases: [] },
+      { label: "gym", aliases: ["fitness center", "fitness centre"] },
+      { label: "yoga studio", aliases: [] },
+      { label: "pilates studio", aliases: [] },
+      { label: "personal trainer", aliases: ["personal training"] },
+      { label: "dance studio", aliases: [] },
+      { label: "martial arts school", aliases: ["dojo", "mma gym"] },
+      { label: "sports club", aliases: ["athletic club"] },
+      { label: "real estate agency", aliases: ["real estate company", "realty company", "realtor"] },
+      { label: "property management company", aliases: ["property manager", "property management"] },
+      { label: "mortgage broker", aliases: ["loan officer", "mortgage company"] },
+      { label: "insurance agency", aliases: ["insurance broker"] },
+      { label: "law firm", aliases: ["attorney", "law office"] },
+      { label: "accounting firm", aliases: ["accountant", "bookkeeping firm"] },
+      { label: "tax service", aliases: ["tax preparation", "tax prep"] },
+      { label: "financial advisor", aliases: ["wealth advisor", "financial planner"] },
+      { label: "consulting firm", aliases: ["consultant"] },
+      { label: "marketing agency", aliases: ["digital marketing agency"] },
+      { label: "advertising agency", aliases: ["ad agency"] },
+      { label: "design studio", aliases: ["creative studio"] },
+      { label: "web design agency", aliases: ["web design company", "website design service"] },
+      { label: "software company", aliases: ["saas company", "tech company"] },
+      { label: "it services company", aliases: ["it company", "tech support company"] },
+      { label: "managed it provider", aliases: ["msp", "managed services provider"] },
+      { label: "photography studio", aliases: ["photographer"] },
+      { label: "videography business", aliases: ["videographer", "video production company"] },
+      { label: "event planning company", aliases: ["event planner"] },
+      { label: "wedding planner", aliases: [] },
+      { label: "dj service", aliases: ["dj company", "disc jockey service"] },
+      { label: "music studio", aliases: [] },
+      { label: "recording studio", aliases: ["audio studio"] },
+      { label: "nonprofit organization", aliases: ["nonprofit", "charity"] },
+      { label: "church", aliases: ["ministry"] },
+      { label: "school", aliases: [] },
+      { label: "tutoring service", aliases: ["tutor", "tutoring business"] },
+      { label: "online course business", aliases: ["course creator", "education business"] },
+      { label: "childcare center", aliases: ["child care center"] },
+      { label: "preschool", aliases: [] },
+      { label: "daycare", aliases: ["day care"] },
+      { label: "cleaning service", aliases: ["cleaning company", "house cleaning"] },
+      { label: "landscaping company", aliases: ["landscaper", "landscape company"] },
+      { label: "gardening service", aliases: ["gardener"] },
+      { label: "pest control company", aliases: ["pest control"] },
+      { label: "plumbing company", aliases: ["plumber", "plumbing service"] },
+      { label: "electrical company", aliases: ["electrician", "electrical service"] },
+      { label: "hvac company", aliases: ["hvac contractor", "heating and cooling company"] },
+      { label: "roofing company", aliases: ["roofer", "roofing contractor"] },
+      { label: "painting company", aliases: ["painter", "painting contractor"] },
+      { label: "construction company", aliases: ["builder", "general contractor"] },
+      { label: "remodeling contractor", aliases: ["remodeler", "home remodeling contractor"] },
+      { label: "handyman service", aliases: ["handyman"] },
+      { label: "home inspection service", aliases: ["home inspector"] },
+      { label: "interior design business", aliases: ["interior designer"] },
+      { label: "architecture firm", aliases: ["architect"] },
+      { label: "auto repair shop", aliases: ["car repair", "mechanic shop", "auto shop"] },
+      { label: "car wash", aliases: ["auto wash"] },
+      { label: "towing company", aliases: ["tow company", "tow truck service"] },
+      { label: "moving company", aliases: ["movers", "moving service"] },
+      { label: "travel agency", aliases: ["travel advisor"] },
+      { label: "hotel", aliases: [] },
+      { label: "vacation rental", aliases: ["short-term rental", "holiday rental"] },
+      { label: "professional services business", aliases: ["professional services company"] },
+    ];
+
+    const BUSINESS_TYPE_ALIAS_TO_LABEL = (() => {
+      const map = new Map();
+      for (const entry of BUSINESS_TYPE_CATALOG) {
+        const label = String(entry.label || "").trim();
+        if (!label) continue;
+        const values = [label, ...(Array.isArray(entry.aliases) ? entry.aliases : [])];
+        for (const value of values) {
+          const normalized = String(value || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9\s&/-]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 80);
+          if (normalized) map.set(normalized, label);
+        }
+      }
+      return map;
+    })();
+
     function normalizeBusinessTypeLabel(text) {
-      return String(text || "")
+      const normalized = String(text || "")
         .toLowerCase()
         .replace(/[^a-z0-9\s&/-]/g, " ")
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 80);
+      return BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
     }
 
     function fallbackSubtypeCandidates(desc) {
@@ -1540,6 +1689,18 @@ ul { margin: 0; padding-left: 18px; }
       if (/(developer|software|engineer|programmer|coding|build apps|build websites|web dev|web developer)/.test(s)) {
         return "software development";
       }
+      if (/(coffee shop|coffeehouse|espresso bar)/.test(s)) return "coffee shop";
+      if (/(cafe|café)/.test(s)) return "cafe";
+      if (/(bakery|baker|pastries|pastry shop)/.test(s)) return "bakery";
+      if (/(barbershop|barber shop|barber)/.test(s)) return "barbershop";
+      if (/(law firm|attorney|law office)/.test(s)) return "law firm";
+      if (/(real estate|realty|realtor)/.test(s)) return "real estate agency";
+      if (/(cleaning service|house cleaning|cleaning company|maid service)/.test(s)) return "cleaning service";
+      if (/(hotel|motel|lodging)/.test(s)) return "hotel";
+      if (/(vacation rental|short term rental|airbnb)/.test(s)) return "vacation rental";
+      if (/(gym|fitness center|fitness centre)/.test(s)) return "gym";
+      if (/(yoga studio|yoga teacher|yoga instructor)/.test(s)) return "yoga studio";
+      if (/(photographer|photography)/.test(s)) return "photography studio";
       if (/(detail|detailing|ceramic|car wash|clean cars|wash cars)/.test(s)) return "auto detailing";
       if (/(scuba|instructor|diving|snorkel|dive guide|dive guiding|dive shop|dive center|divemaster)/.test(s))
         return "dive services";
@@ -5111,6 +5272,12 @@ ul { margin: 0; padding-left: 18px; }
         if (!desc) return json({ ok: false, error: friendlyPromptForText("I run a web3 development studio") }, 400);
 
         independent.business.description_raw = desc;
+        const inferredLocation = extractLocationFromBusinessDescription(desc);
+        if (inferredLocation) {
+          independent.build.service_area = inferredLocation;
+          dependent.research = dependent.research || {};
+          dependent.research.location_hint = inferredLocation;
+        }
         if (wantsWebsiteAuditFirst(desc)) {
           dependent.flow = dependent.flow || {};
           dependent.flow.audit_requested = true;
