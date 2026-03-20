@@ -166,6 +166,7 @@ Apply all migration files:
 - `migrations/0006_business_type_catalog.sql`
 - `migrations/0007_business_type_memory_import.sql`
 - `migrations/0008_business_type_alias_catalog.sql`
+- `migrations/0009_business_type_signal_catalog.sql`
 
 `0006_business_type_catalog.sql` seeds the canonical approved business-type catalog in D1.
 It includes 100 active confirmed labels for normalization, analytics, and downstream template selection.
@@ -173,6 +174,37 @@ It includes 100 active confirmed labels for normalization, analytics, and downst
 `0007_business_type_memory_import.sql` imports the current distinct user-confirmed memory labels into the same D1 catalog table so they can be tracked and normalized centrally.
 
 `0008_business_type_alias_catalog.sql` adds an editable D1 alias table so business-type synonyms can be changed without a code deploy.
+
+`0009_business_type_signal_catalog.sql` adds a D1-backed signal catalog plus `admin_audit_log`.
+This is used for data-driven business-type scoring from natural user language like profession, service, product, and industry terms.
+
+## Business Type Admin Endpoints
+
+These routes are intended for an internal admin panel and use a bearer token stored as a Cloudflare Worker secret:
+
+```bash
+wrangler secret put ADMIN_TOKEN
+```
+
+Current admin routes:
+
+1. `GET /admin/business-types`
+2. `POST /admin/business-types`
+3. `PATCH /admin/business-types/:canonical_type`
+4. `GET /admin/business-types/:canonical_type/aliases`
+5. `POST /admin/business-types/:canonical_type/aliases`
+6. `PATCH /admin/aliases/:alias_phrase`
+7. `DELETE /admin/aliases/:alias_phrase`
+8. `GET /admin/business-types/:canonical_type/signals`
+9. `POST /admin/business-types/:canonical_type/signals`
+10. `PATCH /admin/signals/:id`
+11. `DELETE /admin/signals/:id`
+12. `POST /admin/seed`
+
+`/debug/business-types` now also returns signal counts and seeded signal rows.
+
+For a stronger gate later, Cloudflare Access can sit in front of the admin UI and forward `Cf-Access-Jwt-Assertion`.
+The worker already allows that header through CORS, but bearer token auth is still the active enforcement path.
 
 ## Security Hardening (Implemented)
 

@@ -4,10 +4,11 @@ import { createHmac } from "node:crypto";
 
 import worker from "../worker/index.js";
 
-function createMockDb({ firstResponses = [], allResponses = [] } = {}) {
+function createMockDb({ firstResponses = [], allResponses = [], runResponses = [] } = {}) {
   const statements = [];
   const firstQueue = [...firstResponses];
   const allQueue = [...allResponses];
+  const runQueue = [...runResponses];
 
   return {
     statements,
@@ -17,7 +18,7 @@ function createMockDb({ firstResponses = [], allResponses = [] } = {}) {
           return {
             async run() {
               statements.push({ sql, params, op: "run" });
-              return { success: true };
+              return runQueue.shift() ?? { success: true };
             },
             async first() {
               statements.push({ sql, params, op: "first" });
@@ -799,7 +800,7 @@ test("Q7_EMAIL publishes demo html and returns public demo URL when configured",
   assert.ok(body.cta_actions.some((a) => a.id === "connect_cloudflare"));
 });
 
-test("Q1_DESCRIBE uses OpenAI candidates when deterministic type is too broad", async () => {
+test("Q1_DESCRIBE uses OpenAI candidates when catalog and heuristic matches are too weak", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
   const db = createMockDb({
     firstResponses: [sessionRow, { m: 0 }, null, { m: 1 }],
@@ -829,7 +830,7 @@ test("Q1_DESCRIBE uses OpenAI candidates when deterministic type is too broad", 
       body: JSON.stringify({
         session_id: "ses_20",
         state: "Q1_DESCRIBE",
-        answer: "car repair",
+        answer: "my shop mainly does vehicle alignments and similar work",
       }),
     });
 
@@ -943,6 +944,9 @@ test("debug business-types endpoint returns catalog, aliases, and memory counts"
         ],
       },
       {
+        results: [],
+      },
+      {
         results: [
           { canonical_type: "dive services", phrase_count: 6, confirmation_count: 10 },
         ],
@@ -959,6 +963,168 @@ test("debug business-types endpoint returns catalog, aliases, and memory counts"
   assert.equal(body.counts.catalog_active_confirmed, 1);
   assert.equal(body.counts.alias_total, 1);
   assert.equal(body.counts.memory_label_total, 1);
+});
+
+test("debug business-types endpoint includes signal counts", async () => {
+  const db = createMockDb({
+    allResponses: [
+      {
+        results: [
+          { canonical_type: "restaurant", display_label: "Restaurant", category: "food_and_drink", is_confirmed: 1, is_active: 1 },
+        ],
+      },
+      { results: [] },
+      {
+        results: [
+          { id: 1, canonical_type: "restaurant", signal_type: "strong_keyword", value: "burger joint", normalized_value: "burger joint", weight: 2.7, is_active: 1 },
+        ],
+      },
+      { results: [] },
+    ],
+  });
+
+  const response = await worker.fetch(new Request("https://worker.example/debug/business-types"), { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.counts.signal_total, 1);
+  assert.equal(body.signals[0].signal_type, "strong_keyword");
+});
+
+test("admin business type routes require ADMIN_TOKEN", async () => {
+  const db = createMockDb();
+  const response = await worker.fetch(new Request("https://worker.example/admin/business-types"), { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "ADMIN_TOKEN_NOT_CONFIGURED");
+});
+
+test("admin business type list rejects wrong bearer token", async () => {
+  const db = createMockDb();
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/business-types", {
+      headers: { authorization: "Bearer wrong-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 401);
+  assert.equal(body.error, "unauthorized");
+});
+
+test("admin business type list returns catalog rows with valid bearer token", async () => {
+  const db = createMockDb({
+    allResponses: [
+      {
+        results: [
+          {
+            canonical_type: "law firm",
+            display_label: "Law Firm",
+            category: "professional_services",
+            is_confirmed: 1,
+            is_active: 1,
+            created_at: 1,
+            updated_at: 1,
+            alias_count: 2,
+            signal_count: 3,
+          },
+        ],
+      },
+    ],
+  });
+
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/business-types", {
+      headers: { authorization: "Bearer expected-token" },
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.items[0].canonical_type, "law firm");
+  assert.equal(body.items[0].signal_count, 3);
+});
+
+test("admin seed route upserts catalog aliases and signals with valid bearer token", async () => {
+  const db = createMockDb();
+  const payload = [
+    {
+      slug: "law firm",
+      label: "Law Firm",
+      category: "professional_services",
+      aliases: ["attorney office"],
+      signals: [{ signal_type: "profession", value: "lawyer", weight: 4 }],
+    },
+  ];
+
+  const response = await worker.fetch(
+    new Request("https://worker.example/admin/seed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer expected-token",
+      },
+      body: JSON.stringify(payload),
+    }),
+    { DB: db, ADMIN_TOKEN: "expected-token" }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.count, 1);
+  assert.ok(db.statements.some((s) => s.op === "run" && /INSERT INTO business_type_catalog/i.test(s.sql)));
+  assert.ok(db.statements.some((s) => s.op === "run" && /INSERT INTO business_type_alias_catalog/i.test(s.sql)));
+  assert.ok(db.statements.some((s) => s.op === "run" && /INSERT INTO business_type_signal_catalog/i.test(s.sql)));
+  assert.ok(db.statements.some((s) => s.op === "run" && /INSERT INTO admin_audit_log/i.test(s.sql)));
+});
+
+test("Q1_DESCRIBE uses D1 signal evidence to classify family lawyer correctly", async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: null }), "Q1_DESCRIBE");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+    allResponses: [
+      {
+        results: [
+          { canonical_type: "law firm" },
+          { canonical_type: "restaurant" },
+        ],
+      },
+      {
+        results: [
+          { alias_phrase: "attorney", canonical_type: "law firm" },
+          { alias_phrase: "burger joint", canonical_type: "restaurant" },
+        ],
+      },
+      {
+        results: [
+          { id: 1, canonical_type: "law firm", signal_type: "profession", value: "lawyer", normalized_value: "lawyer", weight: 4 },
+          { id: 2, canonical_type: "law firm", signal_type: "service", value: "family law", normalized_value: "family law", weight: 2.5 },
+        ],
+      },
+    ],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_signal_family_law",
+      state: "Q1_DESCRIBE",
+      answer: "I'm a family lawyer in Lake Tahoe",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q1_CONFIRM_TYPE");
+  assert.match(body.prompt, /law firm/i);
 });
 
 test("worker blocks out-of-order state transitions", async () => {

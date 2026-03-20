@@ -63,8 +63,8 @@ export default {
 
     const corsHeaders = {
       "Access-Control-Allow-Origin": allowed ? origin : "null",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Cf-Access-Jwt-Assertion",
       "Access-Control-Max-Age": "86400",
       "Vary": "Origin",
     };
@@ -81,6 +81,17 @@ export default {
 
     const now = () => Date.now();
     const newId = (prefix) => `${prefix}_${crypto.randomUUID()}`;
+    const ADMIN_SIGNAL_TYPES = new Set([
+      "statement_prefix",
+      "statement_pattern",
+      "strong_keyword",
+      "weak_keyword",
+      "negative_keyword",
+      "profession",
+      "service",
+      "product",
+      "industry_term",
+    ]);
     const clientIpFromRequest = () => {
       const cfIp = String(request.headers.get("CF-Connecting-IP") || "").trim();
       if (cfIp) return cfIp;
@@ -217,6 +228,104 @@ export default {
         },
         403
       );
+    }
+
+    function decodePathSegment(value) {
+      try {
+        return decodeURIComponent(String(value || ""));
+      } catch {
+        return String(value || "");
+      }
+    }
+
+    async function parseJsonBody(req) {
+      try {
+        return await req.json();
+      } catch {
+        return null;
+      }
+    }
+
+    function normalizeAdminCatalogValue(text) {
+      return String(text || "")
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/['’]/g, "")
+        .replace(/[^a-z0-9\s&/-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+    }
+
+    function assertAdminText(value, field) {
+      const s = String(value || "").trim();
+      if (s) return s;
+      throw new Response(
+        JSON.stringify({ ok: false, error: `${field}_required` }, null, 2),
+        { status: 400, headers: { "content-type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    function assertAdminSignalType(value) {
+      const signalType = String(value || "").trim();
+      if (ADMIN_SIGNAL_TYPES.has(signalType)) return signalType;
+      throw new Response(
+        JSON.stringify({ ok: false, error: "invalid_signal_type" }, null, 2),
+        { status: 400, headers: { "content-type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    function boolToInt(value, defaultValue = 1) {
+      if (value === undefined) return defaultValue ? 1 : 0;
+      return value ? 1 : 0;
+    }
+
+    async function requireAdmin(req) {
+      const configuredToken = String(env.ADMIN_TOKEN || "").trim();
+      if (!configuredToken) {
+        throw new Response(
+          JSON.stringify({ ok: false, error: "ADMIN_TOKEN_NOT_CONFIGURED" }, null, 2),
+          { status: 503, headers: { "content-type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      const auth = String(req.headers.get("authorization") || "");
+      const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+      if (!token || token !== configuredToken) {
+        throw new Response(
+          JSON.stringify({ ok: false, error: "unauthorized" }, null, 2),
+          { status: 401, headers: { "content-type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      return "token-admin";
+    }
+
+    async function writeAdminAudit(actor, action, entity_type, entity_key, payload_json) {
+      try {
+        await env.DB.prepare(
+          `INSERT INTO admin_audit_log(actor, action, entity_type, entity_key, payload_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+          .bind(actor, action, entity_type, entity_key, JSON.stringify(payload_json ?? null), now())
+          .run();
+      } catch {}
+    }
+
+    async function runAdminRoute(fn) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (err instanceof Response) return err;
+        return json(
+          {
+            ok: false,
+            error: "admin_route_failed",
+            detail: err instanceof Error ? err.message : String(err),
+          },
+          500
+        );
+      }
     }
 
     // ===== Placeholder demo URL for now =====
@@ -1444,6 +1553,7 @@ ul { margin: 0; padding-left: 18px; }
       loadedAt: 0,
       labels: null,
       aliases: null,
+      signals: null,
     };
 
     function basicNormalizeBusinessTypeLabel(text) {
@@ -1469,9 +1579,14 @@ ul { margin: 0; padding-left: 18px; }
       if (
         businessTypeCatalogCache.labels &&
         businessTypeCatalogCache.aliases &&
+        businessTypeCatalogCache.signals &&
         nowMs - businessTypeCatalogCache.loadedAt < 5 * 60 * 1000
       ) {
-        return { labels: businessTypeCatalogCache.labels, aliases: businessTypeCatalogCache.aliases };
+        return {
+          labels: businessTypeCatalogCache.labels,
+          aliases: businessTypeCatalogCache.aliases,
+          signals: businessTypeCatalogCache.signals,
+        };
       }
 
       try {
@@ -1484,6 +1599,7 @@ ul { margin: 0; padding-left: 18px; }
             .filter(Boolean)
         );
         let aliases = new Map();
+        let signals = [];
         try {
           const aliasRes = await env.DB.prepare(
             "SELECT alias_phrase, canonical_type FROM business_type_alias_catalog WHERE is_active=1"
@@ -1497,19 +1613,46 @@ ul { margin: 0; padding-left: 18px; }
               .filter(([alias, canonical]) => alias && canonical)
           );
         } catch {}
+        try {
+          const signalRes = await env.DB.prepare(
+            `SELECT id, canonical_type, signal_type, value, normalized_value, weight
+             FROM business_type_signal_catalog
+             WHERE is_active=1`
+          ).bind().all();
+          signals = (Array.isArray(signalRes?.results) ? signalRes.results : [])
+            .map((row) => ({
+              id: Number(row?.id || 0),
+              canonical_type: basicNormalizeBusinessTypeLabel(row?.canonical_type || ""),
+              signal_type: String(row?.signal_type || ""),
+              value: String(row?.value || ""),
+              normalized_value: basicNormalizeBusinessTypeLabel(row?.normalized_value || row?.value || ""),
+              weight: Number(row?.weight ?? 1),
+            }))
+            .filter((row) => row.canonical_type && row.signal_type && row.normalized_value);
+        } catch {}
 
         if (labels.size) {
           businessTypeCatalogCache.labels = labels;
           businessTypeCatalogCache.aliases = aliases.size ? aliases : fallbackBusinessTypeAliasMap();
+          businessTypeCatalogCache.signals = signals;
           businessTypeCatalogCache.loadedAt = nowMs;
-          return { labels: businessTypeCatalogCache.labels, aliases: businessTypeCatalogCache.aliases };
+          return {
+            labels: businessTypeCatalogCache.labels,
+            aliases: businessTypeCatalogCache.aliases,
+            signals: businessTypeCatalogCache.signals,
+          };
         }
       } catch {}
 
       businessTypeCatalogCache.labels = fallbackBusinessTypeLabelSet();
       businessTypeCatalogCache.aliases = fallbackBusinessTypeAliasMap();
+      businessTypeCatalogCache.signals = [];
       businessTypeCatalogCache.loadedAt = nowMs;
-      return { labels: businessTypeCatalogCache.labels, aliases: businessTypeCatalogCache.aliases };
+      return {
+        labels: businessTypeCatalogCache.labels,
+        aliases: businessTypeCatalogCache.aliases,
+        signals: businessTypeCatalogCache.signals,
+      };
     }
 
     async function canonicalizeBusinessTypeLabel(text) {
@@ -1526,6 +1669,104 @@ ul { margin: 0; padding-left: 18px; }
     function normalizeBusinessTypeLabel(text) {
       const normalized = basicNormalizeBusinessTypeLabel(text);
       return BUSINESS_TYPE_ALIAS_TO_LABEL.get(normalized) || normalized;
+    }
+
+    function signalWeightDefault(signalType) {
+      if (signalType === "profession") return 4;
+      if (signalType === "strong_keyword") return 3;
+      if (signalType === "service" || signalType === "product" || signalType === "industry_term") return 2;
+      if (signalType === "negative_keyword") return -3;
+      if (signalType === "weak_keyword") return 1;
+      if (signalType === "statement_prefix" || signalType === "statement_pattern") return 1.5;
+      return 1;
+    }
+
+    function includesPhrase(normalizedText, normalizedNeedle) {
+      if (!normalizedText || !normalizedNeedle) return false;
+      if (normalizedText === normalizedNeedle) return true;
+      return normalizedText.includes(` ${normalizedNeedle} `) ||
+        normalizedText.startsWith(`${normalizedNeedle} `) ||
+        normalizedText.endsWith(` ${normalizedNeedle}`) ||
+        normalizedText.includes(normalizedNeedle);
+    }
+
+    async function classifyBusinessTypeFromCatalog(description) {
+      const raw = String(description || "").trim();
+      const normalized = normalizeBusinessPhrase(raw);
+      const location = extractLocationFromBusinessDescription(raw);
+      if (!normalized) {
+        return { business_type: null, confidence: 0, evidence: [], location, ranked: [] };
+      }
+
+      const { labels, aliases, signals } = await getBusinessTypeCatalogSnapshot();
+      const scores = new Map();
+      const evidenceMap = new Map();
+
+      function pushEvidence(canonical, evidence) {
+        if (!canonical) return;
+        const currentScore = scores.get(canonical) || 0;
+        scores.set(canonical, currentScore + Number(evidence.weight || 0));
+        const list = evidenceMap.get(canonical) || [];
+        list.push(evidence);
+        evidenceMap.set(canonical, list);
+      }
+
+      for (const [aliasPhrase, canonical] of aliases.entries()) {
+        if (!labels.has(canonical) || !includesPhrase(normalized, aliasPhrase)) continue;
+        pushEvidence(canonical, {
+          source: "alias",
+          value: aliasPhrase,
+          weight: normalized === aliasPhrase ? 5 : 4.5,
+        });
+      }
+
+      for (const signal of Array.isArray(signals) ? signals : []) {
+        if (!labels.has(signal.canonical_type)) continue;
+        const normalizedValue = signal.normalized_value;
+        if (!normalizedValue) continue;
+
+        let matched = false;
+        if (signal.signal_type === "statement_prefix") {
+          matched = normalized.startsWith(normalizedValue);
+        } else if (signal.signal_type === "statement_pattern") {
+          matched = includesPhrase(normalized, normalizedValue);
+        } else {
+          matched = includesPhrase(normalized, normalizedValue);
+        }
+
+        if (!matched) continue;
+        const weight = Number.isFinite(signal.weight) ? signal.weight : signalWeightDefault(signal.signal_type);
+        pushEvidence(signal.canonical_type, {
+          source: "signal",
+          signal_type: signal.signal_type,
+          value: signal.value || normalizedValue,
+          weight,
+        });
+      }
+
+      const ranked = Array.from(scores.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([business_type, score]) => ({
+          business_type,
+          score,
+          evidence: (evidenceMap.get(business_type) || []).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight)),
+        }));
+
+      if (!ranked.length || ranked[0].score <= 0) {
+        return { business_type: null, confidence: 0, evidence: [], location, ranked: [] };
+      }
+
+      const best = ranked[0];
+      const runnerUpScore = ranked[1]?.score || 0;
+      const confidence = Math.max(0.35, Math.min(0.99, best.score / Math.max(best.score + runnerUpScore + 1, 1)));
+
+      return {
+        business_type: best.business_type,
+        confidence,
+        evidence: best.evidence.slice(0, 5),
+        location,
+        ranked,
+      };
     }
 
     function fallbackSubtypeCandidates(desc) {
@@ -1740,6 +1981,15 @@ ul { margin: 0; padding-left: 18px; }
     async function resolveBusinessTypeCandidates(description) {
       const remembered = await getRememberedBusinessType(description);
       if (remembered) return { source: "remembered", candidates: [remembered] };
+
+      const classified = await classifyBusinessTypeFromCatalog(description);
+      if (classified.business_type && classified.confidence >= 0.55) {
+        return {
+          source: "catalog",
+          candidates: classified.ranked.slice(0, 3).map((item) => item.business_type),
+          classification: classified,
+        };
+      }
 
       const deterministic = await canonicalizeBusinessTypeLabel(guessBusinessType(description));
       if (deterministic && deterministic !== "local business") {
@@ -3140,6 +3390,336 @@ ul { margin: 0; padding-left: 18px; }
       }
     }
 
+    function resetBusinessTypeCatalogCache() {
+      businessTypeCatalogCache.loadedAt = 0;
+      businessTypeCatalogCache.labels = null;
+      businessTypeCatalogCache.aliases = null;
+      businessTypeCatalogCache.signals = null;
+    }
+
+    async function listAdminBusinessTypes() {
+      await requireAdmin(request);
+      const catalogRes = await env.DB.prepare(
+        `SELECT c.canonical_type, c.display_label, c.category, c.is_confirmed, c.is_active, c.created_at, c.updated_at,
+                COUNT(DISTINCT a.alias_phrase) AS alias_count,
+                COUNT(DISTINCT s.id) AS signal_count
+         FROM business_type_catalog c
+         LEFT JOIN business_type_alias_catalog a
+           ON a.canonical_type = c.canonical_type AND a.is_active = 1
+         LEFT JOIN business_type_signal_catalog s
+           ON s.canonical_type = c.canonical_type AND s.is_active = 1
+         GROUP BY c.canonical_type
+         ORDER BY c.display_label ASC`
+      ).bind().all();
+      return json({ ok: true, items: Array.isArray(catalogRes?.results) ? catalogRes.results : [] });
+    }
+
+    async function createAdminBusinessType() {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const canonical_type = normalizeAdminCatalogValue(assertAdminText(body.canonical_type || body.slug, "canonical_type"));
+      const display_label = assertAdminText(body.display_label || body.label, "display_label");
+      const category = normalizeAdminCatalogValue(assertAdminText(body.category || "custom", "category")).replace(/\s+/g, "_");
+      const is_confirmed = boolToInt(body.is_confirmed, 1);
+      const is_active = boolToInt(body.is_active, 1);
+      const ts = now();
+
+      await env.DB.prepare(
+        `INSERT INTO business_type_catalog
+          (canonical_type, display_label, category, is_confirmed, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(canonical_type, display_label, category, is_confirmed, is_active, ts, ts)
+        .run();
+
+      await writeAdminAudit(actor, "create", "business_type", canonical_type, body);
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, canonical_type }, 201);
+    }
+
+    async function updateAdminBusinessType(canonicalType) {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const canonical_type = normalizeAdminCatalogValue(canonicalType);
+      const current = await env.DB.prepare(
+        `SELECT canonical_type, display_label, category, is_confirmed, is_active
+         FROM business_type_catalog
+         WHERE canonical_type = ?`
+      ).bind(canonical_type).first();
+      if (!current) return json({ ok: false, error: "not_found" }, 404);
+
+      const nextDisplayLabel = body.display_label !== undefined || body.label !== undefined
+        ? assertAdminText(body.display_label || body.label, "display_label")
+        : current.display_label;
+      const nextCategory = body.category !== undefined
+        ? normalizeAdminCatalogValue(assertAdminText(body.category, "category")).replace(/\s+/g, "_")
+        : current.category;
+      const nextConfirmed = body.is_confirmed !== undefined ? boolToInt(body.is_confirmed) : current.is_confirmed;
+      const nextActive = body.is_active !== undefined ? boolToInt(body.is_active) : current.is_active;
+
+      await env.DB.prepare(
+        `UPDATE business_type_catalog
+         SET display_label = ?, category = ?, is_confirmed = ?, is_active = ?, updated_at = ?
+         WHERE canonical_type = ?`
+      )
+        .bind(nextDisplayLabel, nextCategory, nextConfirmed, nextActive, now(), canonical_type)
+        .run();
+
+      await writeAdminAudit(actor, "update", "business_type", canonical_type, body);
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, canonical_type });
+    }
+
+    async function listAdminAliases(canonicalType) {
+      await requireAdmin(request);
+      const canonical_type = normalizeAdminCatalogValue(canonicalType);
+      const aliasRes = await env.DB.prepare(
+        `SELECT alias_phrase, canonical_type, source, is_active, created_at, updated_at
+         FROM business_type_alias_catalog
+         WHERE canonical_type = ?
+         ORDER BY alias_phrase ASC`
+      ).bind(canonical_type).all();
+      return json({ ok: true, items: Array.isArray(aliasRes?.results) ? aliasRes.results : [] });
+    }
+
+    async function createAdminAlias(canonicalType) {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const canonical_type = normalizeAdminCatalogValue(canonicalType);
+      const alias_phrase = normalizeAdminCatalogValue(assertAdminText(body.alias_phrase || body.alias, "alias"));
+      const source = String(body.source || "admin").trim() || "admin";
+      const is_active = boolToInt(body.is_active, 1);
+      const ts = now();
+
+      await env.DB.prepare(
+        `INSERT INTO business_type_alias_catalog(alias_phrase, canonical_type, source, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(alias_phrase) DO UPDATE SET
+           canonical_type = excluded.canonical_type,
+           source = excluded.source,
+           is_active = excluded.is_active,
+           updated_at = excluded.updated_at`
+      )
+        .bind(alias_phrase, canonical_type, source, is_active, ts, ts)
+        .run();
+
+      await writeAdminAudit(actor, "create", "alias", alias_phrase, { ...body, canonical_type });
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, alias_phrase }, 201);
+    }
+
+    async function updateAdminAlias(aliasPhrase) {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const alias_phrase = normalizeAdminCatalogValue(aliasPhrase);
+      const current = await env.DB.prepare(
+        `SELECT alias_phrase, canonical_type, source, is_active
+         FROM business_type_alias_catalog
+         WHERE alias_phrase = ?`
+      ).bind(alias_phrase).first();
+      if (!current) return json({ ok: false, error: "not_found" }, 404);
+
+      const nextCanonical = body.canonical_type !== undefined
+        ? normalizeAdminCatalogValue(assertAdminText(body.canonical_type, "canonical_type"))
+        : current.canonical_type;
+      const nextSource = body.source !== undefined ? String(body.source || "").trim() || "admin" : current.source;
+      const nextActive = body.is_active !== undefined ? boolToInt(body.is_active) : current.is_active;
+
+      await env.DB.prepare(
+        `UPDATE business_type_alias_catalog
+         SET canonical_type = ?, source = ?, is_active = ?, updated_at = ?
+         WHERE alias_phrase = ?`
+      )
+        .bind(nextCanonical, nextSource, nextActive, now(), alias_phrase)
+        .run();
+
+      await writeAdminAudit(actor, "update", "alias", alias_phrase, body);
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, alias_phrase });
+    }
+
+    async function deleteAdminAlias(aliasPhrase) {
+      const actor = await requireAdmin(request);
+      const alias_phrase = normalizeAdminCatalogValue(aliasPhrase);
+      const current = await env.DB.prepare(
+        `SELECT alias_phrase FROM business_type_alias_catalog WHERE alias_phrase = ?`
+      ).bind(alias_phrase).first();
+      if (!current) return json({ ok: false, error: "not_found" }, 404);
+
+      await env.DB.prepare(`DELETE FROM business_type_alias_catalog WHERE alias_phrase = ?`).bind(alias_phrase).run();
+      await writeAdminAudit(actor, "delete", "alias", alias_phrase, null);
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, alias_phrase });
+    }
+
+    async function listAdminSignals(canonicalType) {
+      await requireAdmin(request);
+      const canonical_type = normalizeAdminCatalogValue(canonicalType);
+      const signalRes = await env.DB.prepare(
+        `SELECT id, canonical_type, signal_type, value, normalized_value, weight, notes, is_active, created_at, updated_at
+         FROM business_type_signal_catalog
+         WHERE canonical_type = ?
+         ORDER BY signal_type ASC, weight DESC, value ASC`
+      ).bind(canonical_type).all();
+      return json({ ok: true, items: Array.isArray(signalRes?.results) ? signalRes.results : [] });
+    }
+
+    async function createAdminSignal(canonicalType) {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const canonical_type = normalizeAdminCatalogValue(canonicalType);
+      const signal_type = assertAdminSignalType(body.signal_type);
+      const value = assertAdminText(body.value, "value");
+      const normalized_value = normalizeAdminCatalogValue(value);
+      const weight = Number(body.weight ?? signalWeightDefault(signal_type));
+      const notes = String(body.notes || "").trim() || null;
+      const is_active = boolToInt(body.is_active, 1);
+      if (!Number.isFinite(weight)) return json({ ok: false, error: "invalid_weight" }, 400);
+
+      const result = await env.DB.prepare(
+        `INSERT INTO business_type_signal_catalog
+           (canonical_type, signal_type, value, normalized_value, weight, notes, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(canonical_type, signal_type, value, normalized_value, weight, notes, is_active, now(), now())
+        .run();
+
+      await writeAdminAudit(actor, "create", "signal", String(result?.meta?.last_row_id || ""), { ...body, canonical_type });
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, id: Number(result?.meta?.last_row_id || 0) }, 201);
+    }
+
+    async function updateAdminSignal(signalId) {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!body || Array.isArray(body)) return json({ ok: false, error: "invalid_json" }, 400);
+
+      const id = Number(signalId);
+      if (!Number.isInteger(id) || id <= 0) return json({ ok: false, error: "invalid_id" }, 400);
+      const current = await env.DB.prepare(
+        `SELECT id, canonical_type, signal_type, value, normalized_value, weight, notes, is_active
+         FROM business_type_signal_catalog
+         WHERE id = ?`
+      ).bind(id).first();
+      if (!current) return json({ ok: false, error: "not_found" }, 404);
+
+      const nextSignalType = body.signal_type !== undefined ? assertAdminSignalType(body.signal_type) : current.signal_type;
+      const nextValue = body.value !== undefined ? assertAdminText(body.value, "value") : current.value;
+      const nextNormalized = normalizeAdminCatalogValue(nextValue);
+      const nextWeight = body.weight !== undefined ? Number(body.weight) : Number(current.weight);
+      const nextNotes = body.notes !== undefined ? String(body.notes || "").trim() || null : current.notes;
+      const nextActive = body.is_active !== undefined ? boolToInt(body.is_active) : current.is_active;
+      if (!Number.isFinite(nextWeight)) return json({ ok: false, error: "invalid_weight" }, 400);
+
+      await env.DB.prepare(
+        `UPDATE business_type_signal_catalog
+         SET signal_type = ?, value = ?, normalized_value = ?, weight = ?, notes = ?, is_active = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(nextSignalType, nextValue, nextNormalized, nextWeight, nextNotes, nextActive, now(), id)
+        .run();
+
+      await writeAdminAudit(actor, "update", "signal", String(id), body);
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, id });
+    }
+
+    async function deleteAdminSignal(signalId) {
+      const actor = await requireAdmin(request);
+      const id = Number(signalId);
+      if (!Number.isInteger(id) || id <= 0) return json({ ok: false, error: "invalid_id" }, 400);
+      const current = await env.DB.prepare(
+        `SELECT id FROM business_type_signal_catalog WHERE id = ?`
+      ).bind(id).first();
+      if (!current) return json({ ok: false, error: "not_found" }, 404);
+
+      await env.DB.prepare(`DELETE FROM business_type_signal_catalog WHERE id = ?`).bind(id).run();
+      await writeAdminAudit(actor, "delete", "signal", String(id), null);
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, id });
+    }
+
+    async function seedAdminCatalog() {
+      const actor = await requireAdmin(request);
+      const body = await parseJsonBody(request);
+      if (!Array.isArray(body)) return json({ ok: false, error: "array_required" }, 400);
+
+      for (const item of body) {
+        const canonical_type = normalizeAdminCatalogValue(assertAdminText(item.canonical_type || item.slug, "canonical_type"));
+        const display_label = assertAdminText(item.display_label || item.label, "display_label");
+        const category = normalizeAdminCatalogValue(assertAdminText(item.category || "custom", "category")).replace(/\s+/g, "_");
+        const ts = now();
+
+        await env.DB.prepare(
+          `INSERT INTO business_type_catalog
+             (canonical_type, display_label, category, is_confirmed, is_active, created_at, updated_at)
+           VALUES (?, ?, ?, 1, 1, ?, ?)
+           ON CONFLICT(canonical_type) DO UPDATE SET
+             display_label = excluded.display_label,
+             category = excluded.category,
+             updated_at = excluded.updated_at`
+        )
+          .bind(canonical_type, display_label, category, ts, ts)
+          .run();
+
+        if (Array.isArray(item.aliases)) {
+          for (const aliasValue of item.aliases) {
+            const alias_phrase = normalizeAdminCatalogValue(assertAdminText(aliasValue, "alias"));
+            await env.DB.prepare(
+              `INSERT INTO business_type_alias_catalog(alias_phrase, canonical_type, source, is_active, created_at, updated_at)
+               VALUES (?, ?, 'seed', 1, ?, ?)
+               ON CONFLICT(alias_phrase) DO UPDATE SET
+                 canonical_type = excluded.canonical_type,
+                 source = excluded.source,
+                 is_active = 1,
+                 updated_at = excluded.updated_at`
+            )
+              .bind(alias_phrase, canonical_type, ts, ts)
+              .run();
+          }
+        }
+
+        if (Array.isArray(item.signals)) {
+          for (const signal of item.signals) {
+            const signal_type = assertAdminSignalType(signal?.signal_type);
+            const value = assertAdminText(signal?.value, "value");
+            const normalized_value = normalizeAdminCatalogValue(value);
+            const weight = Number(signal?.weight ?? signalWeightDefault(signal_type));
+            const notes = String(signal?.notes || "").trim() || null;
+            if (!Number.isFinite(weight)) return json({ ok: false, error: "invalid_weight" }, 400);
+
+            await env.DB.prepare(
+              `INSERT INTO business_type_signal_catalog
+                 (canonical_type, signal_type, value, normalized_value, weight, notes, is_active, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+               ON CONFLICT(canonical_type, signal_type, normalized_value) DO UPDATE SET
+                 value = excluded.value,
+                 weight = excluded.weight,
+                 notes = excluded.notes,
+                 is_active = 1,
+                 updated_at = excluded.updated_at`
+            )
+              .bind(canonical_type, signal_type, value, normalized_value, weight, notes, ts, ts)
+              .run();
+          }
+        }
+      }
+
+      await writeAdminAudit(actor, "seed", "catalog", "bulk", { count: body.length });
+      resetBusinessTypeCatalogCache();
+      return json({ ok: true, count: body.length });
+    }
+
     function formatBytesForDisplay(rawBytes) {
       const bytes = Number(rawBytes || 0);
       if (!Number.isFinite(bytes) || bytes <= 0) return "unknown";
@@ -3356,6 +3936,65 @@ ul { margin: 0; padding-left: 18px; }
       });
     }
 
+    if (url.pathname === "/admin/business-types" && request.method === "GET") {
+      return await runAdminRoute(() => listAdminBusinessTypes());
+    }
+
+    if (url.pathname === "/admin/business-types" && request.method === "POST") {
+      return await runAdminRoute(() => createAdminBusinessType());
+    }
+
+    {
+      const businessTypeMatch = url.pathname.match(/^\/admin\/business-types\/([^/]+)$/);
+      if (businessTypeMatch && request.method === "PATCH") {
+        return await runAdminRoute(() => updateAdminBusinessType(decodePathSegment(businessTypeMatch[1])));
+      }
+    }
+
+    {
+      const aliasListMatch = url.pathname.match(/^\/admin\/business-types\/([^/]+)\/aliases$/);
+      if (aliasListMatch && request.method === "GET") {
+        return await runAdminRoute(() => listAdminAliases(decodePathSegment(aliasListMatch[1])));
+      }
+      if (aliasListMatch && request.method === "POST") {
+        return await runAdminRoute(() => createAdminAlias(decodePathSegment(aliasListMatch[1])));
+      }
+    }
+
+    {
+      const aliasItemMatch = url.pathname.match(/^\/admin\/aliases\/(.+)$/);
+      if (aliasItemMatch && request.method === "PATCH") {
+        return await runAdminRoute(() => updateAdminAlias(decodePathSegment(aliasItemMatch[1])));
+      }
+      if (aliasItemMatch && request.method === "DELETE") {
+        return await runAdminRoute(() => deleteAdminAlias(decodePathSegment(aliasItemMatch[1])));
+      }
+    }
+
+    {
+      const signalListMatch = url.pathname.match(/^\/admin\/business-types\/([^/]+)\/signals$/);
+      if (signalListMatch && request.method === "GET") {
+        return await runAdminRoute(() => listAdminSignals(decodePathSegment(signalListMatch[1])));
+      }
+      if (signalListMatch && request.method === "POST") {
+        return await runAdminRoute(() => createAdminSignal(decodePathSegment(signalListMatch[1])));
+      }
+    }
+
+    {
+      const signalItemMatch = url.pathname.match(/^\/admin\/signals\/(\d+)$/);
+      if (signalItemMatch && request.method === "PATCH") {
+        return await runAdminRoute(() => updateAdminSignal(signalItemMatch[1]));
+      }
+      if (signalItemMatch && request.method === "DELETE") {
+        return await runAdminRoute(() => deleteAdminSignal(signalItemMatch[1]));
+      }
+    }
+
+    if (url.pathname === "/admin/seed" && request.method === "POST") {
+      return await runAdminRoute(() => seedAdminCatalog());
+    }
+
     if (request.method === "GET" && url.pathname === "/debug/business-types") {
       const catalogRes = await env.DB.prepare(
         "SELECT canonical_type, display_label, category, is_confirmed, is_active FROM business_type_catalog ORDER BY canonical_type ASC"
@@ -3365,6 +4004,14 @@ ul { margin: 0; padding-left: 18px; }
       try {
         aliasRes = await env.DB.prepare(
           "SELECT alias_phrase, canonical_type, source, is_active FROM business_type_alias_catalog ORDER BY alias_phrase ASC"
+        ).bind().all();
+      } catch {}
+      let signalRes = { results: [] };
+      try {
+        signalRes = await env.DB.prepare(
+          `SELECT id, canonical_type, signal_type, value, normalized_value, weight, is_active
+           FROM business_type_signal_catalog
+           ORDER BY canonical_type ASC, signal_type ASC, value ASC`
         ).bind().all();
       } catch {}
 
@@ -3377,6 +4024,7 @@ ul { margin: 0; padding-left: 18px; }
 
       const catalogRows = Array.isArray(catalogRes?.results) ? catalogRes.results : [];
       const aliasRows = Array.isArray(aliasRes?.results) ? aliasRes.results : [];
+      const signalRows = Array.isArray(signalRes?.results) ? signalRes.results : [];
       const memoryRows = Array.isArray(memoryRes?.results) ? memoryRes.results : [];
 
       return json({
@@ -3388,10 +4036,12 @@ ul { margin: 0; padding-left: 18px; }
             (row) => Number(row?.is_confirmed) === 1 && Number(row?.is_active) === 1
           ).length,
           alias_total: aliasRows.length,
+          signal_total: signalRows.length,
           memory_label_total: memoryRows.length,
         },
         catalog: catalogRows,
         aliases: aliasRows,
+        signals: signalRows,
         memory: memoryRows,
       });
     }
@@ -5415,6 +6065,17 @@ ul { margin: 0; padding-left: 18px; }
         dependent.draft.type_candidates = resolved.candidates;
         dependent.draft.type_source = resolved.source;
         dependent.draft.type_guess = resolved.candidates[0] || "local business";
+        if (resolved.classification) {
+          dependent.draft.type_confidence = resolved.classification.confidence;
+          dependent.draft.type_evidence = resolved.classification.evidence;
+          if (!independent.build.service_area && resolved.classification.location) {
+            independent.build.service_area = resolved.classification.location;
+          }
+          if ((!dependent.research || !dependent.research.location_hint) && resolved.classification.location) {
+            dependent.research = dependent.research || {};
+            dependent.research.location_hint = resolved.classification.location;
+          }
+        }
 
         if ((resolved.candidates || []).length > 1) {
           const numbered = resolved.candidates.map((c, i) => `${i + 1}) ${c}`).join("\n");

@@ -51,9 +51,12 @@ CORS_ALLOWED_ORIGINS = "https://app.cardetailingreno.com"
 UPGRADE_TRAFFIC_THRESHOLD = "2000"
 # Optional public Turnstile site key for frontend challenge.
 TURNSTILE_SITE_KEY = ""
+ADMIN_AUDIENCE = ""
 
 # Optional secret:
 # wrangler secret put OPENAI_API_KEY
+# Optional secret for D1-backed admin catalog CRUD:
+# wrangler secret put ADMIN_TOKEN
 # Optional secret (for encrypting provider tokens in access vault):
 # wrangler secret put CREDENTIAL_VAULT_KEY
 # Optional secret:
