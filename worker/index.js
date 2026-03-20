@@ -1362,12 +1362,18 @@ ul { margin: 0; padding-left: 18px; }
       const t = String(answer || "").trim().toLowerCase();
       if (!t) return "unknown";
 
-      if (/\b(reference|inspiration|inspo|example|similar|like this|style reference|model it after)\b/.test(t)) {
+      if (
+        /\b(reference|inspiration|inspo|example|similar|like this|style reference|model it after|one i like|site i like|a site i like|not mine|isn'?t mine|is not mine|just one i like|one that i like)\b/.test(
+          t
+        )
+      ) {
         return "reference";
       }
 
       if (
-        /\b(current|my website|my site|my current site|that'?s mine|that is mine|it'?s mine|it is mine|yes)\b/.test(t)
+        /\b(current|my website|my site|my current site|that'?s mine|that is mine|it'?s mine|it is mine|yes|this is mine|my own site|my actual site)\b/.test(
+          t
+        )
       ) {
         return "current";
       }

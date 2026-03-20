@@ -1887,6 +1887,30 @@ test('Q2_CONFIRM_OWNERSHIP accepts "reference site" and routes into reference fe
   assert.match(body.prompt, /what do you like most about this site/i);
 });
 
+test('Q2_CONFIRM_OWNERSHIP accepts natural reference phrasing like "one i like"', async () => {
+  const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://divingcatalina.com/scuba-tours/" }), "Q2_CONFIRM_OWNERSHIP");
+  const db = createMockDb({
+    firstResponses: [sessionRow, { m: 0 }, { m: 1 }],
+  });
+
+  const req = new Request("https://worker.example/q1/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: "ses_29d_like",
+      state: "Q2_CONFIRM_OWNERSHIP",
+      answer: "one i like",
+    }),
+  });
+
+  const response = await worker.fetch(req, { DB: db });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.next_state, "Q3_FEEDBACK_OPEN");
+  assert.match(body.prompt, /what do you like most about this site/i);
+});
+
 test("Q2_CONFIRM_OWNERSHIP yes on WordPress offers audit prompt without CTA buttons", async () => {
   const sessionRow = withExpectedState(buildSessionRow({ ownSiteUrl: "https://wp-site.example/" }), "Q2_CONFIRM_OWNERSHIP");
   const db = createMockDb({
